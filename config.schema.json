@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "name": "design_api_config",
+  "description": "Configuration schema for the Design API",
+  "type": "object",
+  "properties": {
+    "mqtt": {
+      "$ref": "#/definitions/mqtt"
+    },
+    "database": {
+      "$ref": "#/definitions/database"
+    },
+    "port": {
+      "type": "integer",
+      "default": 3000,
+      "description": "HTTP服务器的端口号"
+    }
+  },
+  "definitions": {
+    "mqtt": {
+      "type": "object",
+      "properties": {
+        "mqtt_host": {
+          "type": "string",
+          "default": "localhost",
+          "description": "MQTT broker的主机名或IP地址"
+        },
+        "mqtt_port": {
+          "type": "integer",
+          "default": 1883,
+          "description": "MQTT broker的端口号"
+        }
+      }
+    },
+    "database": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "default": "localhost",
+          "description": "数据库服务器的主机名或IP地址"
+        },
+        "port": {
+          "type": "integer",
+          "default": 3306,
+          "description": "数据库服务器的端口号"
+        },
+        "username": {
+          "type": "string",
+          "default": "root",
+          "description": "用户名"
+        },
+        "password": {
+          "type": "string",
+          "default": "",
+          "description": "密码"
+        },
+        "database_name": {
+          "type": "string",
+          "default": "design_api",
+          "description": "数据库名称"
+        },
+        "timezone": {
+          "type": "string",
+          "default": "Z",
+          "description": "时区"
+        }
+      }
+    }
+  }
+}
