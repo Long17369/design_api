@@ -1,4 +1,5 @@
-import { TableInfo } from '@core/database/tables'
+import { TableInfoBuilded } from '@core/database'
+import { ColumnInfo, TableInfo } from '@core/database/tables'
 
 export function buildTableTestAndCreateSQL(table: TableInfo) {
   const { name, base_columns, additional_columns } = table
@@ -23,4 +24,23 @@ export function buildCreateTableSQLs(table: TableInfo) {
   const params = [name]
   const sql = 'CREATE TABLE IF NOT EXISTS ?? (id INT AUTO_INCREMENT PRIMARY KEY)'
   return [sql, params] as [string, string[]]
+}
+
+export function buildTableInfoMap(tables: TableInfo[]): Map<string, TableInfoBuilded> {
+  const tableInfoMap = new Map<string, TableInfoBuilded>()
+  for (const table of tables) {
+    const { name, base_columns, additional_columns } = table
+    const columns = new Map<string, ColumnInfo>()
+    for (const col of [...base_columns, ...additional_columns]) {
+      columns.set(col.name, col)
+    }
+    const tableInfoBuilded: TableInfoBuilded = {
+      name,
+      base_columns,
+      additional_columns,
+      columns,
+    }
+    tableInfoMap.set(name, tableInfoBuilded)
+  }
+  return tableInfoMap
 }

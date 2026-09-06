@@ -5,6 +5,7 @@ import {
   ColumnTypeVARCHAR,
   ColumnTypeENUM,
   ColumnTypeDateTime,
+  TableTools,
 } from './types'
 
 import { TableInfo } from '.'
@@ -31,4 +32,8 @@ const tables: TableInfo[] = [
   (await import('./direct_config')).default,
 ]
 
+// TODO: 暂时不实现
+const tableTools: Record<string, TableTools> = {}
+
 export default tables
+export { tableTools }

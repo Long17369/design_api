@@ -1,4 +1,5 @@
 import { Database, DatabaseConfig } from '.'
+import { TableInfo, ColumnInfo } from './tables'
 
 declare module '@core/database' {
   interface DatabaseConfig {
@@ -10,6 +11,9 @@ declare module '@core/database' {
     timezone: string
   }
   Database
+  interface TableInfoBuilded extends TableInfo {
+    columns: Map<string, ColumnInfo>
+  }
 }
 
 declare module '@core/config' {

@@ -1,3 +1,5 @@
+import { TableInfoBuilded } from '@core/database'
+
 export class ColumnTypeBase {
   public base: string
 
@@ -92,5 +94,12 @@ export class ColumnTypeDateTime extends ColumnTypeBase {
 
   public toSQL(): string[] {
     return super.toSQL()
+  }
+}
+
+export class TableTools {
+  public tableInfo: TableInfoBuilded
+  constructor(tableInfo: TableInfoBuilded) {
+    this.tableInfo = tableInfo
   }
 }

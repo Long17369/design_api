@@ -2,8 +2,10 @@ import { DatabaseConfig } from '.'
 import { log } from '@core/logger'
 import mysql from 'mysql2/promise'
 import tables from './tables'
-import { buildCreateTableSQLs, buildTableTestAndCreateSQL } from './uitls'
+import { buildCreateTableSQLs, buildTableInfoMap, buildTableTestAndCreateSQL } from './uitls'
 import { EventBus } from '@core/bus'
+import { DataQueryParams } from '@/types/types'
+import { TableInfoBuilded } from '.'
 
 const logger = log.get_logger('Database')
 
@@ -12,9 +14,11 @@ export class Database {
   private connection: mysql.Connection | null = null
   private isInitialized: boolean = false
   private bus: EventBus
+  private tables: Map<string, TableInfoBuilded>
 
   constructor(bus: EventBus) {
     this.bus = bus
+    this.tables = new Map()
   }
 
   public async setConfig(config: DatabaseConfig) {
@@ -39,6 +43,7 @@ export class Database {
       throw error
     }
     logger.info('数据库初始化完成')
+    this.tables = buildTableInfoMap(tables)
     this.connection = await this.connect()
     this.isInitialized = true
   }
@@ -151,4 +156,77 @@ export class Database {
   }
 
   // TODO: 统一数据库操作接口
+  public async executeQuery<T = unknown>(options: DataQueryParams) {
+    const { sql, params } = this.buildQuerySQL(options)
+    try {
+      const [rows] = await this.query(sql, params)
+      return rows as T
+    } catch (error) {
+      logger.error(`执行查询失败: ${error}`)
+      throw error
+    }
+  }
+
+  private buildQuerySQL(options: DataQueryParams) {
+    const {
+      table,
+      orderBy,
+      columns = ['*'],
+      where = {},
+      order = 'ASC',
+      limit = '10',
+      offset = '0',
+      distinct = '',
+    } = options
+
+    // 验证表名
+    if (!this.tables.has(table)) {
+      logger.error(`表 ${table} 不存在`)
+      throw new Error(`表 ${table} 不存在`)
+    }
+
+    // 验证distinct
+    if (distinct !== 'DISTINCT' && distinct !== '') throw new Error(`无效的distinct值`)
+
+    // 构建列名字符串
+    for (const col of columns) {
+      if (!this.tables.get(table)?.columns.has(col) && col !== '*') {
+        logger.error(`列 ${col} 不存在于表 ${table}`)
+        throw new Error(`列 ${col} 不存在于表 ${table}`)
+      }
+    }
+    const columnsStr = columns.join(', ')
+
+    // 构建基本查询
+    let sql = `SELECT ${distinct} ${columnsStr} FROM ${table}`
+
+    // 构建where条件
+    const whereClauses: string[] = []
+    const params: (string | number)[] = []
+    for (const [key, value] of Object.entries(where)) {
+      if (!this.tables.get(table)?.columns.has(key)) {
+        logger.error(`列 ${key} 不存在于表 ${table}`)
+        throw new Error(`列 ${key} 不存在于表 ${table}`)
+      }
+      if (Array.isArray(value)) {
+        whereClauses.push(...value.map((v) => `${key} ${v.operator} ?`))
+        params.push(...value.map((v) => v.value))
+      } else {
+        whereClauses.push(`${key} ${value.operator} ?`)
+        params.push(value.value)
+      }
+    }
+    if (whereClauses.length > 0) {
+      sql += ` WHERE ${whereClauses.join(' AND ')}`
+    }
+
+    // 构建order by
+    sql += ` ORDER BY ${orderBy} ${order}`
+
+    // 构建limit和offset
+    sql += ` LIMIT ? OFFSET ?`
+    params.push(limit, offset)
+
+    return { sql, params }
+  }
 }
