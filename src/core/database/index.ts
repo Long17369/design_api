@@ -3,18 +3,21 @@ import { log } from '@core/logger'
 import mysql from 'mysql2/promise'
 import tables, { tableTools } from './tables'
 import { TableTools, SqlValue, WriteResult } from './tables/types'
-import { buildAlterAddColumnSQL, buildCreateTableSQL, buildTableInfoMap } from './uitls'
+import {
+  buildAlterAddColumnSQL,
+  buildCreateTableSQL,
+  buildQuerySQL,
+  buildTableInfoMap,
+  buildWhereSQL,
+  findTableInfo,
+  isColumnAllowed,
+} from './uitls'
 import { bus } from '@core/bus'
 import type { Closable } from '@core/lifecycle'
 import { DataQueryParams, Where } from '@/types/types'
 import { TableInfoBuilded } from '.'
 
 const logger = log.get_logger('Database')
-
-/** 单次查询允许返回的最大行数（与对外 API 约定一致） */
-const MAX_QUERY_LIMIT = 100
-/** 默认查询行数 */
-const DEFAULT_LIMIT = 10
 
 export class Database implements Closable {
   private config: DatabaseConfig | null = null
@@ -245,7 +248,7 @@ export class Database implements Closable {
    */
   public async executeQuery<T = Record<string, unknown>>(options: DataQueryParams): Promise<T[]> {
     await this.ensureReady()
-    const { sql, params } = this.buildQuerySQL(options)
+    const { sql, params } = buildQuerySQL(this.tables, options)
     const [rows] = await this.query(sql, params)
     return rows as T[]
   }
@@ -258,8 +261,8 @@ export class Database implements Closable {
    */
   public async count(table: string, where: Where = {}): Promise<{ count: number }> {
     await this.ensureReady()
-    const info = this.getTableInfo(table)
-    const { sql: whereSQL, params } = this.buildWhereSQL(info, where)
+    const info = findTableInfo(this.tables, table)
+    const { sql: whereSQL, params } = buildWhereSQL(info, where)
     const sql = `SELECT COUNT(*) AS count FROM ${info.name}${whereSQL}`
     const [rows] = await this.query(sql, params)
     const row = (rows as Array<{ count: number }>)[0]
@@ -277,12 +280,12 @@ export class Database implements Closable {
     where: Where = {},
   ): Promise<{ minTime: string | null; maxTime: string | null }> {
     await this.ensureReady()
-    const info = this.getTableInfo(table)
-    if (!this.isColumnValid(info, 'c_time')) {
+    const info = findTableInfo(this.tables, table)
+    if (!isColumnAllowed(info, 'c_time')) {
       logger.error(`表 ${info.name} 没有 c_time 列，无法计算时间范围`)
       throw new Error(`表 ${info.name} 没有 c_time 列，无法计算时间范围`)
     }
-    const { sql: whereSQL, params } = this.buildWhereSQL(info, where)
+    const { sql: whereSQL, params } = buildWhereSQL(info, where)
     const sql = `SELECT MIN(c_time) AS minTime, MAX(c_time) AS maxTime FROM ${info.name}${whereSQL}`
     const [rows] = await this.query(sql, params)
     const row = (rows as Array<{ minTime: string | null; maxTime: string | null }>)[0]
@@ -297,12 +300,12 @@ export class Database implements Closable {
    */
   public async insert(table: string, data: Record<string, SqlValue>): Promise<WriteResult> {
     await this.ensureReady()
-    const info = this.getTableInfo(table)
+    const info = findTableInfo(this.tables, table)
     const columns: string[] = []
     const values: SqlValue[] = []
     for (const [column, value] of Object.entries(data)) {
       if (column === undefined || value === undefined) continue
-      if (!this.isColumnValid(info, column)) {
+      if (!isColumnAllowed(info, column)) {
         logger.error(`列 ${column} 不存在于表 ${info.name}`)
         throw new Error(`列 ${column} 不存在于表 ${info.name}`)
       }
@@ -331,11 +334,11 @@ export class Database implements Closable {
     where: Where,
   ): Promise<WriteResult> {
     await this.ensureReady()
-    const info = this.getTableInfo(table)
+    const info = findTableInfo(this.tables, table)
     const entries: Array<[string, SqlValue]> = []
     for (const [column, value] of Object.entries(data)) {
       if (column === undefined || value === undefined) continue
-      if (!this.isColumnValid(info, column)) {
+      if (!isColumnAllowed(info, column)) {
         logger.error(`列 ${column} 不存在于表 ${info.name}`)
         throw new Error(`列 ${column} 不存在于表 ${info.name}`)
       }
@@ -346,7 +349,7 @@ export class Database implements Closable {
     }
     const values: SqlValue[] = entries.map(([, value]) => value)
     const setSQL = entries.map(([column]) => `${column} = ?`).join(', ')
-    const { sql: whereSQL, params: whereParams } = this.buildWhereSQL(info, where)
+    const { sql: whereSQL, params: whereParams } = buildWhereSQL(info, where)
     const sql = `UPDATE ${info.name} SET ${setSQL}${whereSQL}`
     const [result] = await this.query(sql, [...values, ...whereParams])
     return result as WriteResult
@@ -360,11 +363,11 @@ export class Database implements Closable {
    */
   public async delete(table: string, where: Where): Promise<WriteResult> {
     await this.ensureReady()
-    const info = this.getTableInfo(table)
+    const info = findTableInfo(this.tables, table)
     if (Object.keys(where).length === 0) {
       throw new Error('DELETE 必须提供 where 条件，禁止全表删除')
     }
-    const { sql: whereSQL, params } = this.buildWhereSQL(info, where)
+    const { sql: whereSQL, params } = buildWhereSQL(info, where)
     const sql = `DELETE FROM ${info.name}${whereSQL}`
     const [result] = await this.query(sql, params)
     return result as WriteResult
@@ -383,116 +386,5 @@ export class Database implements Closable {
       this.isInitialized = false
       logger.info('数据库连接已关闭')
     }
-  }
-
-  // ----------------------- SQL 构建（内部） -----------------------
-
-  /** 根据表名取表元信息，不存在则报错 */
-  private getTableInfo(table: string | undefined): TableInfoBuilded {
-    const info = table ? this.tables.get(table) : undefined
-    if (!info) {
-      const name = table ?? ''
-      logger.error(`表 ${name} 不存在`)
-      throw new Error(`表 ${name} 不存在`)
-    }
-    return info
-  }
-
-  /** 列是否存在于表中（所有表统一内置自增主键 id） */
-  private isColumnValid(info: TableInfoBuilded, column: string): boolean {
-    return column === 'id' || info.columns.has(column)
-  }
-
-  /** 构建 WHERE 子句与参数（多条件用 AND 连接） */
-  private buildWhereSQL(info: TableInfoBuilded, where: Where): { sql: string; params: SqlValue[] } {
-    const clauses: string[] = []
-    const params: SqlValue[] = []
-    for (const [column, condition] of Object.entries(where)) {
-      if (column === undefined || condition === undefined) continue
-      if (!this.isColumnValid(info, column)) {
-        logger.error(`列 ${column} 不存在于表 ${info.name}`)
-        throw new Error(`列 ${column} 不存在于表 ${info.name}`)
-      }
-      if (Array.isArray(condition)) {
-        for (const cond of condition) {
-          if (cond === undefined) continue
-          clauses.push(`${column} ${cond.operator} ?`)
-          params.push(cond.value)
-        }
-      } else {
-        clauses.push(`${column} ${condition.operator} ?`)
-        params.push(condition.value)
-      }
-    }
-    return {
-      sql: clauses.length > 0 ? ` WHERE ${clauses.join(' AND ')}` : '',
-      params,
-    }
-  }
-
-  /** 构建通用 SELECT 查询语句 */
-  private buildQuerySQL(options: DataQueryParams): { sql: string; params: SqlValue[] } {
-    const {
-      table,
-      orderBy,
-      columns = ['*'],
-      where = {},
-      order = 'ASC',
-      limit = String(DEFAULT_LIMIT),
-      offset = '0',
-      distinct = '',
-    } = options
-
-    const info = this.getTableInfo(table)
-
-    // 校验去重关键字
-    if (distinct !== 'DISTINCT' && distinct !== '') {
-      throw new Error('无效的 distinct 值')
-    }
-
-    // 校验并构建列
-    for (const column of columns) {
-      if (column === undefined || column === '*') continue
-      if (!this.isColumnValid(info, column)) {
-        logger.error(`列 ${column} 不存在于表 ${info.name}`)
-        throw new Error(`列 ${column} 不存在于表 ${info.name}`)
-      }
-    }
-    const columnsStr = columns.join(', ')
-
-    // 构建基本查询 + WHERE 条件
-    let sql = `SELECT ${distinct} ${columnsStr} FROM ${info.name}`
-    const { sql: whereSQL, params } = this.buildWhereSQL(info, where)
-    sql += whereSQL
-
-    // 排序
-    if (orderBy !== undefined) {
-      if (!this.isColumnValid(info, orderBy)) {
-        logger.error(`排序列 ${orderBy} 不存在于表 ${info.name}`)
-        throw new Error(`排序列 ${orderBy} 不存在于表 ${info.name}`)
-      }
-      const direction = order.toUpperCase()
-      if (direction !== 'ASC' && direction !== 'DESC') {
-        throw new Error('排序方向只能是 ASC 或 DESC')
-      }
-      sql += ` ORDER BY ${orderBy} ${direction}`
-    }
-
-    // 分页（限制上限，避免一次全表拉取）
-    const limitNum = Number.parseInt(limit, 10)
-    if (Number.isNaN(limitNum) || limitNum <= 0) {
-      throw new Error('LIMIT 必须是正整数')
-    }
-    if (limitNum > MAX_QUERY_LIMIT) {
-      throw new Error(`LIMIT 不能超过 ${MAX_QUERY_LIMIT}`)
-    }
-    const offsetNum = Number.parseInt(offset, 10)
-    if (Number.isNaN(offsetNum) || offsetNum < 0) {
-      throw new Error('OFFSET 必须是非负整数')
-    }
-    sql += ` LIMIT ? OFFSET ?`
-    params.push(limitNum, offsetNum)
-
-    return { sql, params }
   }
 }
