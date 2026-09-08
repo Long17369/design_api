@@ -1,4 +1,4 @@
-import { ColumnTypeDateTime, ColumnTypeVARCHAR } from '@core/database/tables'
+import { ColumnTypeDateTime, ColumnTypeVARCHAR } from '../types'
 import { generateFields } from '../utils'
 
 const name = 'behavior_data'

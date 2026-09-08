@@ -1,9 +1,5 @@
-import {
-  ColumnInfo,
-  ColumnTypeDateTime,
-  ColumnTypeINT,
-  ColumnTypeVARCHAR,
-} from '@core/database/tables'
+import { ColumnTypeDateTime, ColumnTypeINT, ColumnTypeVARCHAR } from '../types'
+import type { ColumnInfo } from '@core/database/tables'
 
 const name = 'direct'
 

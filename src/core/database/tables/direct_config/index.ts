@@ -1,4 +1,5 @@
-import { ColumnInfo, ColumnTypeINT, ColumnTypeVARCHAR } from '@core/database/tables'
+import { ColumnTypeINT, ColumnTypeVARCHAR } from '../types'
+import type { ColumnInfo } from '@core/database/tables'
 
 const name = 'direct_config'
 
