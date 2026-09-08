@@ -12,7 +12,7 @@ const MAX_QUERY_LIMIT = 100
 const DEFAULT_LIMIT = 10
 
 /** 反引号包裹标识符并转义内部反引号 */
-function quote(name: string): string {
+export function quote(name: string): string {
   return `\`${name.replace(/`/g, '``')}\``
 }
 
@@ -166,11 +166,11 @@ export function buildWhereSQL(
     if (Array.isArray(condition)) {
       for (const cond of condition) {
         if (cond === undefined) continue
-        clauses.push(`${column} ${cond.operator} ?`)
+        clauses.push(`${quote(column)} ${cond.operator} ?`)
         params.push(cond.value)
       }
     } else {
-      clauses.push(`${column} ${condition.operator} ?`)
+      clauses.push(`${quote(column)} ${condition.operator} ?`)
       params.push(condition.value)
     }
   }
@@ -203,7 +203,7 @@ export function buildQuerySQL(
     throw new Error('无效的 distinct 值')
   }
 
-  // 校验并构建列
+  // 校验并构建列（统一反引号包裹，兼容 order 等保留字列名）
   for (const column of columns) {
     if (column === undefined || column === '*') continue
     if (!isColumnAllowed(info, column)) {
@@ -211,10 +211,10 @@ export function buildQuerySQL(
       throw new Error(`列 ${column} 不存在于表 ${info.name}`)
     }
   }
-  const columnsStr = columns.join(', ')
+  const columnsStr = columns.map((column) => (column === '*' ? '*' : quote(column))).join(', ')
 
   // 构建基本查询 + WHERE 条件
-  let sql = `SELECT ${distinct} ${columnsStr} FROM ${info.name}`
+  let sql = `SELECT ${distinct} ${columnsStr} FROM ${quote(info.name)}`
   const { sql: whereSQL, params } = buildWhereSQL(info, where)
   sql += whereSQL
 
@@ -228,7 +228,7 @@ export function buildQuerySQL(
     if (direction !== 'ASC' && direction !== 'DESC') {
       throw new Error('排序方向只能是 ASC 或 DESC')
     }
-    sql += ` ORDER BY ${orderBy} ${direction}`
+    sql += ` ORDER BY ${quote(orderBy)} ${direction}`
   }
 
   // 分页（限制上限，避免一次全表拉取）

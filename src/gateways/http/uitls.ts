@@ -1,5 +1,6 @@
 import type { SuccessResponse, ErrorResponse, ErrorCode } from '@gateways/http'
 import type { Database } from '@core/database'
+import type { DirectModule } from '@modules/directModule'
 import type { Where, WhereCondition, WhereOperator } from '@/types/types'
 import type { Request, Response } from 'express'
 
@@ -198,8 +199,58 @@ export async function handleDataDevices(db: Database, _req: Request, res: Respon
 }
 
 /**
- * 未实现接口占位（注册路由但返回 501）
+ * 处理 GET /direct/config —— 返回全部指令配置
  */
-export async function handleNotImplemented(_req: Request, res: Response): Promise<void> {
-  res.status(501).json(errorResponse('接口尚未实现', 'NOT_IMPLEMENTED'))
+export async function handleDirectConfigList(
+  dm: DirectModule,
+  _req: Request,
+  res: Response,
+): Promise<void> {
+  const data = await dm.listConfigs()
+  res.status(200).json(successResponse(data))
+}
+
+/**
+ * 处理 GET /direct/data —— 返回某设备的指令值列表
+ */
+export async function handleDirectDeviceData(
+  dm: DirectModule,
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const raw = req.query.d_no
+  const d_no =
+    typeof raw === 'string'
+      ? raw
+      : Array.isArray(raw) && typeof raw[0] === 'string'
+        ? raw[0]
+        : undefined
+  if (!d_no) {
+    throw new HttpError(400, 'INVALID_PARAMS', '缺少 d_no 参数')
+  }
+  const data = await dm.listByDevice(d_no)
+  res.status(200).json(successResponse(data))
+}
+
+/**
+ * 处理 POST /direct/update —— 修改某设备某条指令值
+ */
+export async function handleDirectUpdate(
+  dm: DirectModule,
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const body = (req.body ?? {}) as Record<string, unknown>
+  const { config_id, value, d_no } = body
+  if (
+    typeof config_id !== 'string' ||
+    config_id === '' ||
+    typeof d_no !== 'string' ||
+    d_no === '' ||
+    (typeof value !== 'string' && typeof value !== 'number')
+  ) {
+    throw new HttpError(400, 'INVALID_PARAMS', '缺少 config_id / value / d_no')
+  }
+  await dm.setValue({ config_id, value, d_no })
+  res.status(200).json(successResponse({ config_id, value, d_no }))
 }

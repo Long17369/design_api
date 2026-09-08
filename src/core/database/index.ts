@@ -11,6 +11,7 @@ import {
   buildWhereSQL,
   findTableInfo,
   isColumnAllowed,
+  quote,
   sortTablesForCreate,
 } from './uitls'
 import { bus } from '@core/bus'
@@ -20,11 +21,6 @@ import { TableInfoBuilded } from '.'
 import { TABLE_SEEDS, type TableSeed } from './seeds'
 
 const logger = log.get_logger('Database')
-
-/** 反引号包裹标识符并转义内部反引号（order 等保留字需加反引号） */
-function quote(name: string): string {
-  return `\`${name.replace(/`/g, '``')}\``
-}
 
 export class Database implements Closable {
   private config: DatabaseConfig | null = null
@@ -272,7 +268,7 @@ export class Database implements Closable {
     await this.ensureReady()
     const info = findTableInfo(this.tables, table)
     const { sql: whereSQL, params } = buildWhereSQL(info, where)
-    const sql = `SELECT COUNT(*) AS count FROM ${info.name}${whereSQL}`
+    const sql = `SELECT COUNT(*) AS count FROM ${quote(info.name)}${whereSQL}`
     const [rows] = await this.query(sql, params)
     const row = (rows as Array<{ count: number }>)[0]
     return { count: Number(row?.count ?? 0) }
@@ -295,7 +291,7 @@ export class Database implements Closable {
       throw new Error(`表 ${info.name} 没有 c_time 列，无法计算时间范围`)
     }
     const { sql: whereSQL, params } = buildWhereSQL(info, where)
-    const sql = `SELECT MIN(c_time) AS minTime, MAX(c_time) AS maxTime FROM ${info.name}${whereSQL}`
+    const sql = `SELECT MIN(c_time) AS minTime, MAX(c_time) AS maxTime FROM ${quote(info.name)}${whereSQL}`
     const [rows] = await this.query(sql, params)
     const row = (rows as Array<{ minTime: string | null; maxTime: string | null }>)[0]
     return { minTime: row?.minTime ?? null, maxTime: row?.maxTime ?? null }
@@ -325,7 +321,7 @@ export class Database implements Closable {
       throw new Error('INSERT 数据不能为空')
     }
     const placeholders = columns.map(() => '?').join(', ')
-    const sql = `INSERT INTO ${info.name} (${columns.join(', ')}) VALUES (${placeholders})`
+    const sql = `INSERT INTO ${quote(info.name)} (${columns.map((column) => quote(column)).join(', ')}) VALUES (${placeholders})`
     const [result] = await this.query(sql, values)
     return result as WriteResult
   }
@@ -357,9 +353,9 @@ export class Database implements Closable {
       throw new Error('UPDATE 数据不能为空')
     }
     const values: SqlValue[] = entries.map(([, value]) => value)
-    const setSQL = entries.map(([column]) => `${column} = ?`).join(', ')
+    const setSQL = entries.map(([column]) => `${quote(column)} = ?`).join(', ')
     const { sql: whereSQL, params: whereParams } = buildWhereSQL(info, where)
-    const sql = `UPDATE ${info.name} SET ${setSQL}${whereSQL}`
+    const sql = `UPDATE ${quote(info.name)} SET ${setSQL}${whereSQL}`
     const [result] = await this.query(sql, [...values, ...whereParams])
     return result as WriteResult
   }
@@ -377,7 +373,7 @@ export class Database implements Closable {
       throw new Error('DELETE 必须提供 where 条件，禁止全表删除')
     }
     const { sql: whereSQL, params } = buildWhereSQL(info, where)
-    const sql = `DELETE FROM ${info.name}${whereSQL}`
+    const sql = `DELETE FROM ${quote(info.name)}${whereSQL}`
     const [result] = await this.query(sql, params)
     return result as WriteResult
   }

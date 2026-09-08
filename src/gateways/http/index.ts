@@ -3,6 +3,7 @@ import express, { Request, Response } from 'express'
 import { bus } from '@core/bus'
 import { log } from '@core/logger'
 import type { Database } from '@core/database'
+import { DirectModuleError, type DirectModule } from '@modules/directModule'
 import type { Closable } from '@core/lifecycle'
 import {
   DATA_SOURCES,
@@ -12,7 +13,9 @@ import {
   handleCount,
   handleData,
   handleDataDevices,
-  handleNotImplemented,
+  handleDirectConfigList,
+  handleDirectDeviceData,
+  handleDirectUpdate,
   handleTable,
   handleTimeRange,
 } from './uitls'
@@ -27,6 +30,7 @@ type RouteHandler = (req: Request, res: Response) => Promise<void>
 export class HttpServer implements Closable {
   private app: express.Express
   private database: Database | null = null
+  private directModule: DirectModule | null = null
   private server: http.Server | null = null
 
   /** 事件订阅注销句柄集合（强引用监听；close 时统一注销） */
@@ -48,12 +52,25 @@ export class HttpServer implements Closable {
     this.database = database
   }
 
+  /** 注入 Direct 中间模块（处理 /direct 接口） */
+  public setDirectModule(directModule: DirectModule) {
+    this.directModule = directModule
+  }
+
   /** 获取数据库实例，未注入时报错 */
   private db(): Database {
     if (!this.database) {
       throw new Error('HttpServer 尚未注入 Database 实例')
     }
     return this.database
+  }
+
+  /** 获取 Direct 模块，未注入时报错 */
+  private direct(): DirectModule {
+    if (!this.directModule) {
+      throw new Error('HttpServer 尚未注入 DirectModule 实例')
+    }
+    return this.directModule
   }
 
   public bindServer() {
@@ -130,16 +147,29 @@ export class HttpServer implements Closable {
       wrap((req, res) => handleDataDevices(this.db(), req, res)),
     )
 
-    // TODO: 指令(direct)相关接口暂未实现（后续接入 direct / direct_config）
-    this.app.get(`${API_BASE}/direct/config`, wrap(handleNotImplemented))
-    this.app.get(`${API_BASE}/direct/data`, wrap(handleNotImplemented))
-    this.app.post(`${API_BASE}/direct/update`, wrap(handleNotImplemented))
+    // 指令(direct)接口：由 DirectModule 处理（暂只接 HTTP，真实控制下发待接入）
+    this.app.get(
+      `${API_BASE}/direct/config`,
+      wrap((req, res) => handleDirectConfigList(this.direct(), req, res)),
+    )
+    this.app.get(
+      `${API_BASE}/direct/data`,
+      wrap((req, res) => handleDirectDeviceData(this.direct(), req, res)),
+    )
+    this.app.post(
+      `${API_BASE}/direct/update`,
+      wrap((req, res) => handleDirectUpdate(this.direct(), req, res)),
+    )
   }
 
   /** 统一错误响应 */
   private handleError(res: Response, err: unknown) {
     if (err instanceof HttpError) {
       res.status(err.status).json(errorResponse(err.message, err.code))
+      return
+    }
+    if (err instanceof DirectModuleError) {
+      res.status(err.status).json(errorResponse(err.message, 'INVALID_PARAMS'))
       return
     }
     const message = err instanceof Error ? err.message : String(err)

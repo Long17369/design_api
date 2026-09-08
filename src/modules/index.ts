@@ -1,4 +1,5 @@
 import { AlarmModule } from './alarmModule'
 import { AutoControlModule } from './autoControl'
+import { DirectModule } from './directModule'
 
-export { AlarmModule, AutoControlModule }
+export { AlarmModule, AutoControlModule, DirectModule }

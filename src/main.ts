@@ -3,7 +3,7 @@ import { Config } from '@core/config'
 import { Database } from '@core/database'
 import { log } from '@core/logger'
 import { MqttGateway, HttpServer, WebSocketServer } from '@gateways'
-import { AlarmModule, AutoControlModule } from '@modules'
+import { AlarmModule, AutoControlModule, DirectModule } from '@modules'
 
 const logger = log.get_logger('Main')
 
@@ -19,6 +19,9 @@ async function main() {
   mqtt.setConfig(config.mqtt)
   const http = new HttpServer()
   http.setDatabase(database)
+  const directModule = new DirectModule()
+  directModule.setDatabase(database)
+  http.setDirectModule(directModule)
   const server = http.bindServer()
   const webSocket = new WebSocketServer()
   webSocket.attach(server)
