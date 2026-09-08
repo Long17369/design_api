@@ -1,5 +1,5 @@
 import { ColumnTypeDateTime, ColumnTypeVARCHAR } from '../types'
-import type { ColumnInfo } from '@core/database/tables'
+import { ColumnInfo } from '@core/database/tables'
 import { generateFields } from '../utils'
 
 const name = 'control_log'

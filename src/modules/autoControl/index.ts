@@ -1,6 +1,6 @@
 import { bus } from '@core/bus'
 import { log } from '@core/logger'
-import type { Closable } from '@core/lifecycle'
+import { Closable } from '@core/lifecycle'
 
 const logger = log.get_logger('AutoControlModule')
 

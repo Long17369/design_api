@@ -7,6 +7,15 @@ import {
 } from './types'
 
 declare module '@core/database/tables' {
+  /** 数据库字段值：可作为参数化 SQL 的占位符值 */
+  type SqlValue = string | number | null | Date
+
+  /** 写操作执行结果（对齐 mysql2 OkPacket 的关键字段） */
+  interface WriteResult {
+    affectedRows: number
+    insertId: number
+  }
+
   type ColumnType =
     ColumnTypeINT | ColumnTypeFLOAT | ColumnTypeVARCHAR | ColumnTypeENUM | ColumnTypeDateTime
 

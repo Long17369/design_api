@@ -2,7 +2,7 @@ import { Server } from 'http'
 import { WebSocketServer as WServer, WebSocket } from 'ws'
 import { log } from '@core/logger'
 import { bus } from '@core/bus'
-import type { Closable } from '@core/lifecycle'
+import { Closable } from '@core/lifecycle'
 import { WsAlarm, WsEventType, WsMessage, WsMessageData } from '@/types/types'
 
 const logger = log.get_logger('WebSocketServer')

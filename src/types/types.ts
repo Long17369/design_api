@@ -16,6 +16,17 @@ export interface ErrorResponse {
 
 export type ApiResponse<T> = SuccessResponse<T> | ErrorResponse
 
+/**
+ * 数据源（后端资源域）：每个域对应一张“数据表 + 字段映射表”。
+ * - sensor   → sensor_data / sensor_data_mapper   （传感器采集数据）
+ * - behavior → behavior_data / behavior_data_mapper（行为数据）
+ * - error    → error_msg / error_msg_mapper        （故障/告警）
+ * - control  → control_log / control_log_mapper    （控制记录）
+ *
+ * 兼容说明：历史命名 'data'（原单一“数据”域）暂时在 api.ts 内重定向到 sensor_data。
+ */
+export type DataSourceName = 'sensor' | 'behavior' | 'error' | 'control' | 'data'
+
 export type FieldNum = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10
 export type FieldName = `field${FieldNum}`
 export type DbName = 'id' | 'd_no' | 'c_time' | FieldName

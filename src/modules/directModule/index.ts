@@ -1,8 +1,9 @@
 import { bus } from '@core/bus'
 import { log } from '@core/logger'
-import type { Closable } from '@core/lifecycle'
-import type { Database } from '@core/database'
-import type { Direct, DirectConfig } from '@/types/types'
+import { Closable } from '@core/lifecycle'
+import { Database } from '@core/database'
+import { Direct, DirectConfig } from '@/types/types'
+import { DirectConfigRow } from '.'
 
 const logger = log.get_logger('DirectModule')
 
@@ -15,25 +16,6 @@ export class DirectModuleError extends Error {
     this.name = 'DirectModuleError'
     this.status = status
   }
-}
-
-/** direct_config 表行（含保留字 order 列，查询时需加反引号） */
-interface DirectConfigRow {
-  code: string
-  ref_code: string | null
-  ref_value: string | null
-  t_name: string | null
-  f_type: string | null
-  f_value: string | null
-  mode: string | null
-  max: string | null
-  min: string | null
-  order: string | null
-  topic: string | null
-  preffix: string | null
-  icon: string | null
-  type: string | null
-  default_value: string | null
 }
 
 /**

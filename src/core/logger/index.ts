@@ -3,6 +3,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as zlib from 'zlib'
 import { pipeline } from 'stream/promises'
+import { LoggerOptions } from '.'
 
 enum LogLevel {
   TRACE = 0,
@@ -11,12 +12,6 @@ enum LogLevel {
   WARN = 3,
   ERROR = 4,
   FATAL = 5,
-}
-
-interface LoggerOptions {
-  logDir?: string
-  maxFileSize?: number
-  maxRetentionDays?: number
 }
 
 class Logger {

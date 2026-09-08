@@ -1,5 +1,5 @@
 import { ColumnTypeVARCHAR } from './types'
-import type { ColumnInfo } from '@core/database/tables'
+import { ColumnInfo } from '@core/database/tables'
 
 /**
  * 生成预留数据字段（field1..fieldN）。

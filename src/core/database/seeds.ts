@@ -1,16 +1,4 @@
-import type { SqlValue } from './tables/types'
-
-/**
- * 一张表的“初始化项”定义。
- * keyColumn：用于判断某行是否已存在的唯一键列（幂等去重）。
- *   - 字段映射表(mapper)：固定使用自增主键 `id`（显式指定以保持顺序）
- *   - direct_config：使用业务配置码 `code`
- */
-export interface TableSeed {
-  table: string
-  keyColumn: string
-  rows: Array<Record<string, SqlValue>>
-}
+import { TableSeed } from '@core/database/seeds'
 
 /**
  * 各表默认初始化数据（来源于参考项目 mysql_node_api 的 sql.sql，

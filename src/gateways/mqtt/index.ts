@@ -1,15 +1,11 @@
 import mqtt from 'mqtt'
 import { log } from '@core/logger'
 import { bus } from '@core/bus'
-import type { Closable } from '@core/lifecycle'
-import { MQTTConfig, MQTTMessageOut } from '.'
-import { TopicHandler } from './components'
+import { Closable } from '@core/lifecycle'
+import { MQTTConfig, MQTTMessageOut, TopicHandlers } from '.'
 import topics from './components'
 
 const logger = log.get_logger('MqttGateway')
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type TopicHandlers = TopicHandler<any>
 
 export class MqttGateway implements Closable {
   private client: mqtt.MqttClient | null = null

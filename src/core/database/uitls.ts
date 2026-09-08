@@ -1,8 +1,8 @@
 import { log } from '@core/logger'
-import type { DataQueryParams, Where } from '@/types/types'
+import { DataQueryParams, Where } from '@/types/types'
 import { TableInfoBuilded } from '@core/database'
 import { ColumnInfo, TableInfo } from '@core/database/tables'
-import type { SqlValue } from './tables/types'
+import { SqlValue } from './tables'
 
 const logger = log.get_logger('Database')
 

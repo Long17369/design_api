@@ -1,14 +1,6 @@
 import { DataQueryParamsWithoutTable, Where } from '@/types/types'
 import { Database, TableInfoBuilded } from '@core/database'
-
-/** 数据库字段值：可作为参数化 SQL 的占位符值 */
-export type SqlValue = string | number | null | Date
-
-/** 写操作执行结果（对齐 mysql2 OkPacket 的关键字段） */
-export interface WriteResult {
-  affectedRows: number
-  insertId: number
-}
+import { SqlValue, WriteResult } from '@core/database/tables'
 
 /** 列类型基类：记录类型名并提供建表用的 SQL 类型描述 */
 export class ColumnTypeBase {

@@ -2,12 +2,11 @@ import http from 'http'
 import express, { Request, Response } from 'express'
 import { bus } from '@core/bus'
 import { log } from '@core/logger'
-import type { Database } from '@core/database'
-import { DirectModuleError, type DirectModule } from '@modules/directModule'
-import type { Closable } from '@core/lifecycle'
+import { Database } from '@core/database'
+import { DirectModuleError, DirectModule } from '@modules/directModule'
+import { Closable } from '@core/lifecycle'
 import {
   DATA_SOURCES,
-  DataSourceDef,
   HttpError,
   errorResponse,
   handleCount,
@@ -19,13 +18,12 @@ import {
   handleTable,
   handleTimeRange,
 } from './uitls'
+import { DataSourceDef, RouteHandler } from '.'
 
 const logger = log.get_logger('HttpServer')
 
 /** 对外接口统一前缀，与前端 api.ts 的 BASE_URL 保持一致 */
 const API_BASE = '/api'
-
-type RouteHandler = (req: Request, res: Response) => Promise<void>
 
 export class HttpServer implements Closable {
   private app: express.Express

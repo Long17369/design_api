@@ -1,4 +1,4 @@
-import type {
+import {
   FieldMapper,
   Data,
   ApiResponse,
@@ -9,20 +9,10 @@ import type {
   FetchOptions,
   FrontendDataQueryParams,
   Where,
+  DataSourceName,
 } from './types'
 
 const BASE_URL = '/api'
-
-/**
- * 数据源（后端资源域）：每个域对应一张“数据表 + 字段映射表”。
- * - sensor   → sensor_data / sensor_data_mapper   （传感器采集数据）
- * - behavior → behavior_data / behavior_data_mapper（行为数据）
- * - error    → error_msg / error_msg_mapper        （故障/告警）
- * - control  → control_log / control_log_mapper    （控制记录）
- *
- * 兼容说明：历史命名 'data'（原单一“数据”域）暂时在 api.ts 内重定向到 sensor_data。
- */
-export type DataSourceName = 'sensor' | 'behavior' | 'error' | 'control' | 'data'
 
 /** 旧命名重定向表：'data' 暂指向 'sensor' */
 const SOURCE_ALIAS: Record<string, DataSourceName> = {

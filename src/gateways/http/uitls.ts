@@ -1,14 +1,8 @@
-import type { SuccessResponse, ErrorResponse, ErrorCode } from '@gateways/http'
-import type { Database } from '@core/database'
-import type { DirectModule } from '@modules/directModule'
-import type { Where, WhereCondition, WhereOperator } from '@/types/types'
-import type { Request, Response } from 'express'
-
-/** 数据源 → 后端表 映射 */
-export interface DataSourceDef {
-  dataTable: string
-  mapperTable: string
-}
+import { SuccessResponse, ErrorResponse, ErrorCode, DataSourceDef } from '@gateways/http'
+import { Database } from '@core/database'
+import { DirectModule } from '@modules/directModule'
+import { Where, WhereCondition, WhereOperator } from '@/types/types'
+import { Request, Response } from 'express'
 
 export const DATA_SOURCES: Record<string, DataSourceDef> = {
   sensor: { dataTable: 'sensor_data', mapperTable: 'sensor_data_mapper' },

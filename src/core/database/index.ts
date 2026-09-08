@@ -2,7 +2,8 @@ import { DatabaseConfig } from '.'
 import { log } from '@core/logger'
 import mysql from 'mysql2/promise'
 import tables, { tableTools } from './tables'
-import { TableTools, SqlValue, WriteResult } from './tables/types'
+import { TableTools } from './tables/types'
+import { SqlValue, WriteResult } from './tables'
 import {
   buildAlterAddColumnSQL,
   buildCreateTableSQL,
@@ -15,10 +16,10 @@ import {
   sortTablesForCreate,
 } from './uitls'
 import { bus } from '@core/bus'
-import type { Closable } from '@core/lifecycle'
+import { Closable } from '@core/lifecycle'
 import { DataQueryParams, Where } from '@/types/types'
 import { TableInfoBuilded } from '.'
-import { TABLE_SEEDS, type TableSeed } from './seeds'
+import { TABLE_SEEDS, TableSeed } from './seeds'
 
 const logger = log.get_logger('Database')
 
