@@ -1,7 +1,17 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import Ajv from 'ajv'
 import { log } from '@core/logger'
 
 const logger = log.get_logger('Config')
+
+/** 解析 '@root/...' 等 tsconfig paths 别名为项目根下的真实路径（开发期以进程工作目录为根） */
+function resolveConfigPath(p: string): string {
+  if (p.startsWith('@root/')) {
+    return path.resolve(process.cwd(), p.slice('@root/'.length))
+  }
+  return path.resolve(process.cwd(), p)
+}
 
 export class Config {
   private path: string
@@ -13,37 +23,29 @@ export class Config {
     try {
       this.init()
     } catch (err) {
-      if (err instanceof Error) {
-        logger.error(`读取配置文件失败: ${err.message}`)
-      } else {
-        logger.error(`读取配置文件时发生未知错误: ${err}`)
-      }
-      return
+      const message = err instanceof Error ? err.message : String(err)
+      logger.error(`读取配置文件失败: ${message}`)
     }
   }
 
-  private async init() {
-    const config = require(this.path)
-    const schema = require(this.schemaPath)
+  /** 同步读取并校验配置文件，将结果合并到实例属性上 */
+  private init() {
+    const config = JSON.parse(fs.readFileSync(resolveConfigPath(this.path), 'utf-8')) as object
+    const schema = JSON.parse(
+      fs.readFileSync(resolveConfigPath(this.schemaPath), 'utf-8'),
+    ) as object
     const ajv = new Ajv({
       useDefaults: true,
       removeAdditional: true,
       coerceTypes: false,
       allErrors: false,
+      strict: false,
     })
-    try {
-      const validate = ajv.compile(schema)
-      const valid = validate(config)
-      if (!valid) {
-        logger.error(`验证配置文件失败: ${validate.errors?.map((e) => e.message).join(', ')}`)
-      }
-      Object.assign(this, config)
-    } catch (parseErr) {
-      if (parseErr instanceof Error) {
-        logger.error(`验证配置文件时发生错误: ${parseErr.message}`)
-      } else {
-        logger.error(`验证配置文件时发生未知错误: ${parseErr}`)
-      }
+    const validate = ajv.compile(schema)
+    if (!validate(config)) {
+      logger.error(`验证配置文件失败: ${validate.errors?.map((e) => e.message).join(', ')}`)
+      return
     }
+    Object.assign(this, config)
   }
 }
