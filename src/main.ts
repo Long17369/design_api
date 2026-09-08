@@ -2,8 +2,11 @@
 import { EventBus } from '@core/bus'
 import { Config } from '@core/config'
 import { Database } from '@core/database'
+import { log } from '@core/logger'
 import { MqttGateway, HttpServer, WebSocketServer } from '@gateways'
 import { AlarmModule, AutoControlModule } from '@modules'
+
+const logger = log.get_logger('Main')
 
 async function main() {
   const bus = new EventBus()
@@ -16,9 +19,13 @@ async function main() {
   const mqtt = new MqttGateway(bus)
   mqtt.setConfig(config.mqtt)
   const http = new HttpServer(bus)
+  http.setDatabase(database)
   const server = http.bindServer()
   const webSocket = new WebSocketServer(bus)
   webSocket.attach(server)
+  server.listen(config.port, () => {
+    logger.info(`HTTP Server 已启动，监听端口 ${config.port}`)
+  })
 
   // 2. 注册所有模块（它们会自动订阅 Bus 事件）
   const autoControlModule = new AutoControlModule(bus)

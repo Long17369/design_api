@@ -7,8 +7,9 @@ declare module '@gateways/http' {
     success: true
     data: T
   }
-  // HTTP 错误响应 范围错误 数据库错误 参数错误 未知错误
-  type ErrorCode = 'INVALID_PARAMETER' | 'DATABASE_ERROR' | 'INVALID_PARAMS' | 'UNKNOWN_ERROR'
+  // HTTP 错误响应 范围错误 数据库错误 参数错误 未知错误 未实现
+  type ErrorCode =
+    'INVALID_PARAMETER' | 'DATABASE_ERROR' | 'INVALID_PARAMS' | 'UNKNOWN_ERROR' | 'NOT_IMPLEMENTED'
   interface ErrorResponse {
     success: false
     error: {
@@ -17,4 +18,10 @@ declare module '@gateways/http' {
     }
   }
   type ApiResponse<T> = SuccessResponse<T> | ErrorResponse
+}
+
+declare module '@core/config' {
+  interface Config {
+    port: number
+  }
 }

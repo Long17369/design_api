@@ -17,6 +17,27 @@ import type {
 const BASE_URL = '/api'
 
 /**
+ * 数据源（后端资源域）：每个域对应一张“数据表 + 字段映射表”。
+ * - sensor   → sensor_data / sensor_data_mapper   （传感器采集数据）
+ * - behavior → behavior_data / behavior_data_mapper（行为数据）
+ * - error    → error_msg / error_msg_mapper        （故障/告警）
+ * - control  → control_log / control_log_mapper    （控制记录）
+ *
+ * 兼容说明：历史命名 'data'（原单一“数据”域）暂时在 api.ts 内重定向到 sensor_data。
+ */
+export type DataSourceName = 'sensor' | 'behavior' | 'error' | 'control' | 'data'
+
+/** 旧命名重定向表：'data' 暂指向 'sensor' */
+const SOURCE_ALIAS: Record<string, DataSourceName> = {
+  data: 'sensor',
+}
+
+/** 把前端传入的数据源名解析为后端资源名（'data' → 'sensor'） */
+function resolveSource(source: string): string {
+  return SOURCE_ALIAS[source] ?? source
+}
+
+/**
  * 通用 API 请求函数
  */
 async function fetchApi<T>(url: string, options?: FetchOptions): Promise<T> {
@@ -31,19 +52,22 @@ async function fetchApi<T>(url: string, options?: FetchOptions): Promise<T> {
 }
 
 /**
- *
- * @param table 表名
+ * 获取字段映射（表头/字段语义）
+ * @param source 数据源名：sensor / behavior / error / control（'data' 暂时指向 sensor）
  * @returns Promise<FieldMapper[]>
  */
-export async function getDataMapper(table: string) {
-  return fetchApi<FieldMapper[]>(`${BASE_URL}/${table}/table`)
+export async function getDataMapper(source: string): Promise<FieldMapper[]> {
+  return fetchApi<FieldMapper[]>(`${BASE_URL}/${resolveSource(source)}/table`)
 }
 
 /**
- * 获取数据
+ * 获取数据（分页 + 排序 + 条件过滤）
+ * @param source 数据源名：sensor / behavior / error / control（'data' 暂时指向 sensor）
+ * @param params 查询参数
+ * @returns Promise<Data[]>
  */
 export async function getData(
-  table: string, // TODO: 改为泛型实现自动识别返回类型
+  source: string,
   params: FrontendDataQueryParams = {},
 ): Promise<Data[]> {
   const { limit = 10, offset = 0, order_table = 'id', desc = false, where = {} } = params
@@ -54,34 +78,37 @@ export async function getData(
     desc: desc.toString(),
     where: JSON.stringify(where),
   })
-  return fetchApi<Data[]>(`${BASE_URL}/${table}/data?${queryString}`)
+  return fetchApi<Data[]>(`${BASE_URL}/${resolveSource(source)}/data?${queryString}`)
 }
 
 /**
  * 获取数据总数
- * @param table 表名
+ * @param source 数据源名：sensor / behavior / error / control（'data' 暂时指向 sensor）
  * @param where 查询条件
  * @returns Promise<DataCount>
  */
-export async function getCount(table: string, where: Where) {
+export async function getCount(source: string, where: Where = {}): Promise<DataCount> {
   const queryString = new URLSearchParams({
     where: JSON.stringify(where),
   })
-  return fetchApi<DataCount>(`${BASE_URL}/${table}/count?${queryString}`)
+  return fetchApi<DataCount>(`${BASE_URL}/${resolveSource(source)}/count?${queryString}`)
 }
 
 /**
  * 获取数据时间范围
- * @param table 表名
+ * @param source 数据源名：sensor / behavior / error / control（'data' 暂时指向 sensor）
  * @param where 查询条件
  * @returns Promise<{ minTime: string; maxTime: string }>
  */
-export async function getTimeRange(table: string, where: Where = {}) {
+export async function getTimeRange(
+  source: string,
+  where: Where = {},
+): Promise<{ minTime: string; maxTime: string }> {
   const queryString = new URLSearchParams({
     where: JSON.stringify(where),
   })
   return fetchApi<{ minTime: string; maxTime: string }>(
-    `${BASE_URL}/${table}/time-range?${queryString}`,
+    `${BASE_URL}/${resolveSource(source)}/time-range?${queryString}`,
   )
 }
 
