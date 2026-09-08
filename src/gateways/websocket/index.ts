@@ -46,7 +46,7 @@ export class WebSocketServer {
 
       ws.on('message', (data) => {
         try {
-          const msg = JSON.parse(data.toString())
+          const msg = JSON.parse(data.toString()) as object
           logger.debug(`收到客户端消息:`, msg)
           // 预留：处理客户端请求（如请求特定设备数据）
         } catch {

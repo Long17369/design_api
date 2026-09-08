@@ -15,6 +15,9 @@ export default [
       parserOptions: {
         ecmaVersion: 'latest',
         sourceType: 'module',
+        projectService: {
+          allowDefaultProject: ['*.config.ts'], // 允许根目录的 .config.ts 文件
+        },
       },
     },
     plugins: {
@@ -27,6 +30,8 @@ export default [
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-unused-vars': 'warn',
       'prettier/prettier': 'error',
+      '@typescript-eslint/no-unsafe-argument': 'warn',
+      '@typescript-eslint/no-unsafe-assignment': 'warn',
     },
   },
   eslintConfigPrettier,

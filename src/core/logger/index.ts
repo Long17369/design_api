@@ -116,8 +116,10 @@ class Logger {
     if (level >= this.level) {
       const consoleMessage = `${color}[${timestamp}] [${levelName}] [${name}] ${message}${resetColor}`
       if (level >= LogLevel.ERROR) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
         console.error(consoleMessage, ...args)
       } else {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
         console.log(consoleMessage, ...args)
       }
     }
