@@ -1,4 +1,4 @@
-import { ColumnTypeDateTime, ColumnTypeINT, ColumnTypeVARCHAR } from '../types'
+import { ColumnTypeDateTime, ColumnTypeVARCHAR } from '../types'
 import type { ColumnInfo } from '@core/database/tables'
 
 const name = 'direct'
@@ -8,8 +8,8 @@ const base_columns: ColumnInfo[] = []
 const additional_columns = [
   {
     name: 'config_id',
-    type: new ColumnTypeINT(11),
-    desc: '配置ID',
+    type: new ColumnTypeVARCHAR(64),
+    desc: '指令配置码（对应 direct_config.code）',
   },
   {
     name: 'value',

@@ -1,4 +1,4 @@
-import { ColumnTypeINT, ColumnTypeVARCHAR } from '../types'
+import { ColumnTypeVARCHAR } from '../types'
 import type { ColumnInfo } from '@core/database/tables'
 
 const name = 'direct_config'
@@ -7,14 +7,19 @@ const base_columns: ColumnInfo[] = []
 
 const additional_columns = [
   {
-    name: 'ref_id',
-    type: new ColumnTypeINT(11),
-    desc: '关联的指令配置Id',
+    name: 'code',
+    type: new ColumnTypeVARCHAR(64),
+    desc: '指令配置码（业务唯一标识，如 auto/heat/water）',
+  },
+  {
+    name: 'ref_code',
+    type: new ColumnTypeVARCHAR(64),
+    desc: '关联的父指令配置码，若父配置的取值与此处吻合，则显示该指令',
   },
   {
     name: 'ref_value',
     type: new ColumnTypeVARCHAR(256),
-    desc: '关联的指令配置值\r\n如果配置的Id的值与此处吻合，显示该指令配置',
+    desc: '关联的指令配置值\r\n如果父配置的码值与此处吻合，显示该指令配置',
   },
   {
     name: 't_name',

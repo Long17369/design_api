@@ -16,8 +16,14 @@ import { bus } from '@core/bus'
 import type { Closable } from '@core/lifecycle'
 import { DataQueryParams, Where } from '@/types/types'
 import { TableInfoBuilded } from '.'
+import { TABLE_SEEDS, type TableSeed } from './seeds'
 
 const logger = log.get_logger('Database')
+
+/** 反引号包裹标识符并转义内部反引号（order 等保留字需加反引号） */
+function quote(name: string): string {
+  return `\`${name.replace(/`/g, '``')}\``
+}
 
 export class Database implements Closable {
   private config: DatabaseConfig | null = null
@@ -69,7 +75,9 @@ export class Database implements Closable {
       // 3. 构建表元信息，并自动建表 / 增量补列
       this.tables = buildTableInfoMap(tables)
       await this.initTables()
-      // 4. 初始化各表的数据访问工具
+      // 4. 同步各表初始化项（仅同步已存在的表）
+      await this.syncInitialRows()
+      // 5. 初始化各表的数据访问工具
       this.initTableTools()
       this.isInitialized = true
     } catch (error) {
@@ -371,6 +379,93 @@ export class Database implements Closable {
     const sql = `DELETE FROM ${info.name}${whereSQL}`
     const [result] = await this.query(sql, params)
     return result as WriteResult
+  }
+
+  // ----------------------- 初始化项同步（内部） -----------------------
+  // 参考 mysql_node_api 的默认数据，仅在对应表已存在时同步，且只补缺失行
+  // （按 keyColumn 去重：mapper 表用 id，direct_config 用 code），不覆盖/不删除已有数据。
+
+  /**
+   * 同步各表初始化项
+   */
+  private async syncInitialRows(): Promise<void> {
+    if (!this.connection) {
+      logger.error('数据库连接未初始化')
+      throw new Error('数据库连接未初始化')
+    }
+    for (const seed of TABLE_SEEDS) {
+      await this.syncOneSeed(this.connection, seed)
+    }
+  }
+
+  /**
+   * 同步单张表的初始化项
+   * @param connection 数据库连接
+   * @param seed 初始化项定义
+   */
+  private async syncOneSeed(connection: mysql.Connection, seed: TableSeed): Promise<void> {
+    const info = findTableInfo(this.tables, seed.table)
+
+    // 仅同步已存在的表
+    const existsRows = (await connection.query(
+      `SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+      [info.name],
+    )) as [Array<{ count: number }>, unknown]
+    if (Number(existsRows[0]?.[0]?.count ?? 0) === 0) {
+      logger.info(`表 ${info.name} 不存在，跳过初始化项同步`)
+      return
+    }
+
+    if (!isColumnAllowed(info, seed.keyColumn)) {
+      logger.error(`同步键列 ${seed.keyColumn} 不存在于表 ${info.name}`)
+      throw new Error(`同步键列 ${seed.keyColumn} 不存在于表 ${info.name}`)
+    }
+    if (seed.rows.length === 0) {
+      return
+    }
+
+    // 查询表中已存在的键，避免重复插入
+    const keyValues: SqlValue[] = []
+    for (const row of seed.rows) {
+      const key = row[seed.keyColumn]
+      if (key !== undefined && key !== null) keyValues.push(key)
+    }
+    if (keyValues.length === 0) {
+      logger.warn(`表 ${info.name} 的初始化项缺少同步键 ${seed.keyColumn}，已跳过`)
+      return
+    }
+    const keyColumn = quote(seed.keyColumn)
+    const placeholders = keyValues.map(() => '?').join(', ')
+    const [existingRows] = (await connection.query(
+      `SELECT ${keyColumn} AS \`key\` FROM ${info.name} WHERE ${keyColumn} IN (${placeholders})`,
+      keyValues,
+    )) as [Array<{ key: string | number }>, unknown]
+    const existing = new Set(existingRows.map((row) => String(row.key)))
+
+    let insertedCount = 0
+    for (const row of seed.rows) {
+      const key = row[seed.keyColumn]
+      if (key === undefined || key === null || existing.has(String(key))) continue
+
+      const columns: string[] = []
+      const values: SqlValue[] = []
+      for (const [column, value] of Object.entries(row)) {
+        if (column === undefined || value === undefined) continue
+        if (!isColumnAllowed(info, column)) {
+          logger.error(`列 ${column} 不存在于表 ${info.name}，无法同步初始化项`)
+          throw new Error(`列 ${column} 不存在于表 ${info.name}，无法同步初始化项`)
+        }
+        columns.push(column)
+        values.push(value)
+      }
+      if (columns.length === 0) continue
+
+      const quotedColumns = columns.map((column) => quote(column)).join(', ')
+      const sql = `INSERT INTO ${info.name} (${quotedColumns}) VALUES (${columns.map(() => '?').join(', ')})`
+      await connection.query(sql, values)
+      insertedCount++
+    }
+    logger.info(`表 ${info.name} 初始化项同步完成：新增 ${insertedCount} / ${seed.rows.length} 行`)
   }
 
   /**
