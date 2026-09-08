@@ -4,7 +4,8 @@ import mysql from 'mysql2/promise'
 import tables, { tableTools } from './tables'
 import { TableTools, SqlValue, WriteResult } from './tables/types'
 import { buildAlterAddColumnSQL, buildCreateTableSQL, buildTableInfoMap } from './uitls'
-import { EventBus } from '@core/bus'
+import { bus } from '@core/bus'
+import type { Closable } from '@core/lifecycle'
 import { DataQueryParams, Where } from '@/types/types'
 import { TableInfoBuilded } from '.'
 
@@ -15,16 +16,22 @@ const MAX_QUERY_LIMIT = 100
 /** 默认查询行数 */
 const DEFAULT_LIMIT = 10
 
-export class Database {
+export class Database implements Closable {
   private config: DatabaseConfig | null = null
   private connection: mysql.Connection | null = null
   private isInitialized: boolean = false
-  private bus: EventBus
   private tables: Map<string, TableInfoBuilded>
 
-  constructor(bus: EventBus) {
-    this.bus = bus
+  /** 事件订阅注销句柄集合（强引用监听；close 时统一注销，解除 bus 对本实例的引用） */
+  private readonly unsubscribers: Array<() => void> = []
+
+  constructor() {
     this.tables = new Map()
+    this.unsubscribers.push(
+      bus.onEvent('shutdown', () => {
+        this.close()
+      }),
+    )
   }
 
   /**
@@ -37,7 +44,7 @@ export class Database {
       const message = err instanceof Error ? err.message : String(err)
       logger.error(`数据库初始化失败: ${message}`)
       // 通知总线进行错误处理
-      this.bus.emitEvent('errorMessage', {
+      bus.emitEvent('errorMessage', {
         error: new Error(`数据库初始化失败: ${message}`),
         level: 'fatal',
         source: 'Database',
@@ -369,6 +376,8 @@ export class Database {
    * @returns
    */
   public async close() {
+    // 统一注销所有事件订阅，释放 bus 对本实例的引用
+    this.unsubscribers.splice(0).forEach((unsubscribe) => unsubscribe())
     if (this.connection) {
       await this.connection.end()
       this.connection = null

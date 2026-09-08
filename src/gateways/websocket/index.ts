@@ -1,18 +1,25 @@
 import { Server } from 'http'
 import { WebSocketServer as WServer, WebSocket } from 'ws'
 import { log } from '@core/logger'
-import { EventBus } from '@core/bus'
+import { bus } from '@core/bus'
+import type { Closable } from '@core/lifecycle'
 import { WsAlarm, WsEventType, WsMessage, WsMessageData } from '@/types/types'
 
 const logger = log.get_logger('WebSocketServer')
 
-export class WebSocketServer {
+export class WebSocketServer implements Closable {
   private wss: WServer | null = null
   private clients: Set<WebSocket> = new Set()
-  private bus: EventBus
 
-  constructor(bus: EventBus) {
-    this.bus = bus
+  /** 事件订阅注销句柄集合（强引用监听；close 时统一注销） */
+  private readonly unsubscribers: Array<() => void> = []
+
+  constructor() {
+    this.unsubscribers.push(
+      bus.onEvent('shutdown', () => {
+        this.close()
+      }),
+    )
   }
 
   public attach(server: Server) {
@@ -55,11 +62,26 @@ export class WebSocketServer {
       })
     })
 
-    this.bus.onEvent('WSMessageOUT', (message) => {
-      this.broadcast(message.event, message.data)
-    })
+    this.unsubscribers.push(
+      bus.onEvent('WSMessageOUT', (message) => {
+        this.broadcast(message.event, message.data)
+      }),
+    )
 
     logger.info('WebSocket 服务已启动')
+  }
+
+  /**
+   * 释放资源：退订 WSMessageOUT、断开所有客户端并关闭 wss
+   */
+  public close(): void {
+    this.unsubscribers.splice(0).forEach((unsubscribe) => unsubscribe())
+    for (const client of this.clients) {
+      client.terminate()
+    }
+    this.clients.clear()
+    this.wss?.close()
+    this.wss = null
   }
 
   /** 向所有已连接客户端广播消息 */
@@ -123,8 +145,6 @@ export class WebSocketServer {
     }
   }
 }
-
-// TODO: last
 
 function query(sql: string, params?: (string | number)[]) {
   logger.warn('数据库查询函数 query() 尚未实现，返回空结果, 查询SQL:', sql, '参数:', params)

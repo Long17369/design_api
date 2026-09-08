@@ -1,6 +1,7 @@
 import mqtt from 'mqtt'
 import { log } from '@core/logger'
-import { EventBus } from '@core/bus'
+import { bus } from '@core/bus'
+import type { Closable } from '@core/lifecycle'
 import { MQTTConfig, MQTTMessageOut } from '.'
 import { TopicHandler } from './components'
 import topics from './components'
@@ -10,18 +11,29 @@ const logger = log.get_logger('MqttGateway')
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type TopicHandlers = TopicHandler<any>
 
-export class MqttGateway {
+export class MqttGateway implements Closable {
   private client: mqtt.MqttClient | null = null
   private brokerUrl: string | null = null
-  private bus: EventBus
   private topicHandlers: Map<string, TopicHandlers>
 
-  constructor(bus: EventBus) {
-    this.bus = bus
+  /** 事件订阅注销句柄集合（强引用监听；close 时统一注销） */
+  private readonly unsubscribers: Array<() => void> = []
+
+  constructor() {
     this.topicHandlers = new Map()
     topics.forEach((topicHandler) => {
       this.topicHandlers.set(topicHandler.topic, topicHandler)
     })
+    this.unsubscribers.push(
+      bus.onEvent('shutdown', () => {
+        this.close()
+      }),
+    )
+    this.unsubscribers.push(
+      bus.onEvent('MQTT_PUBLISH', (data) => {
+        this.sendMessage(data)
+      }),
+    )
   }
 
   public setConfig(config: MQTTConfig) {
@@ -31,10 +43,6 @@ export class MqttGateway {
     }
     this.brokerUrl = `mqtt://${config.mqtt_host}:${config.mqtt_port}`
     this.client = mqtt.connect(this.brokerUrl)
-
-    this.bus.onEvent('MQTT_PUBLISH', (data) => {
-      this.sendMessage(data)
-    })
 
     this.client.on('connect', () => {
       logger.info(`Connected to MQTT broker at ${this.brokerUrl}`)
@@ -48,6 +56,18 @@ export class MqttGateway {
       logger.debug(`收到消息 topic=${topic}: ${message.toString()}`)
       this.handleMessage(topic, message)
     })
+  }
+
+  /**
+   * 释放资源：退订 MQTT_PUBLISH、断开并清空 mqtt 客户端
+   */
+  public close(): void {
+    this.unsubscribers.splice(0).forEach((unsubscribe) => unsubscribe())
+    if (this.client) {
+      this.client.end(true)
+      this.client = null
+    }
+    this.brokerUrl = null
   }
 
   private async handleMessage(topic: string, message: Buffer) {

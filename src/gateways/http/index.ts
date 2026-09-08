@@ -1,8 +1,9 @@
 import http from 'http'
 import express, { Request, Response } from 'express'
+import { bus } from '@core/bus'
 import { log } from '@core/logger'
-import { EventBus } from '@core/bus'
 import type { Database } from '@core/database'
+import type { Closable } from '@core/lifecycle'
 import {
   DATA_SOURCES,
   DataSourceDef,
@@ -22,16 +23,23 @@ const API_BASE = '/api'
 
 type RouteHandler = (req: Request, res: Response) => Promise<void>
 
-export class HttpServer {
+export class HttpServer implements Closable {
   app: express.Express
-  bus: EventBus
   private database: Database | null = null
+  private server: http.Server | null = null
 
-  constructor(bus: EventBus) {
-    this.bus = bus
+  /** 事件订阅注销句柄集合（强引用监听；close 时统一注销） */
+  private readonly unsubscribers: Array<() => void> = []
+
+  constructor() {
     // 初始化 HTTP 服务器
     this.app = express()
     this.init()
+    this.unsubscribers.push(
+      bus.onEvent('shutdown', () => {
+        this.close()
+      }),
+    )
   }
 
   /** 注入数据库实例（main.ts 中在 Database 初始化后调用） */
@@ -48,7 +56,28 @@ export class HttpServer {
   }
 
   public bindServer() {
-    return http.createServer(this.app)
+    this.server = http.createServer(this.app)
+    return this.server
+  }
+
+  /**
+   * 释放资源：关闭 HTTP 监听服务
+   */
+  public close(): Promise<void> {
+    this.unsubscribers.splice(0).forEach((unsubscribe) => unsubscribe())
+    return new Promise((resolve) => {
+      const server = this.server
+      if (!server) {
+        resolve()
+        return
+      }
+      server.close(() => {
+        this.server = null
+        resolve()
+      })
+      // 立即断开残留 keep-alive 连接，避免 close 回调被阻塞
+      server.closeAllConnections()
+    })
   }
 
   private init() {
