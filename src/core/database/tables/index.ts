@@ -9,6 +9,16 @@ import {
 } from './types'
 
 import { TableInfo } from '.'
+import behavior_data from './behavior_data'
+import behavior_data_mapper from './behavior_data_mapper'
+import control_log from './control_log'
+import control_log_mapper from './control_log_mapper'
+import sensor_data from './sensor_data'
+import sensor_data_mapper from './sensor_data_mapper'
+import error_msg from './error_msg'
+import error_msg_mapper from './error_msg_mapper'
+import direct from './direct'
+import direct_config from './direct_config'
 
 export {
   ColumnTypeBase,
@@ -20,20 +30,20 @@ export {
 }
 
 const tables: TableInfo[] = [
-  (await import('./behavior_data')).default,
-  (await import('./behavior_data_mapper')).default,
-  (await import('./control_log')).default,
-  (await import('./control_log_mapper')).default,
-  (await import('./sensor_data')).default,
-  (await import('./sensor_data_mapper')).default,
-  (await import('./error_msg')).default,
-  (await import('./error_msg_mapper')).default,
-  (await import('./direct')).default,
-  (await import('./direct_config')).default,
+  behavior_data,
+  behavior_data_mapper,
+  control_log,
+  control_log_mapper,
+  sensor_data,
+  sensor_data_mapper,
+  error_msg,
+  error_msg_mapper,
+  direct,
+  direct_config,
 ]
 
-// TODO: 暂时不实现
-const tableTools: Record<string, TableTools> = {}
+// 运行时由 Database.initTableTools() 在数据库初始化完成后填充
+const tableTools: Map<string, TableTools> = new Map()
 
 export default tables
 export { tableTools }

@@ -5,9 +5,9 @@ declare module '@core/database' {
   interface DatabaseConfig {
     host: string
     port: number
-    user: string
+    username: string
     password: string
-    database: string
+    database_name: string
     timezone: string
   }
   Database

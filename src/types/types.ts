@@ -90,7 +90,7 @@ export interface Device {
 export type CreateDeviceParams = Omit<Device, 'id' | 'c_time'>
 export type UpdateDeviceParams = Partial<Omit<Device, 'id' | 'c_time'>>
 
-export type WhereOperator = '=' | '>' | '<' | '>=' | '<='
+export type WhereOperator = '=' | '>' | '<' | '>=' | '<=' | '!='
 
 export interface WhereCondition {
   value: string
@@ -101,10 +101,20 @@ export interface Where {
   [key: string]: WhereCondition | WhereCondition[]
 }
 
+export interface DataQueryParamsWithoutTable {
+  orderBy?: string // 默认: "id"
+  columns?: string[]
+  where?: Where
+  order?: string // 默认: false
+  limit?: string // 默认: 10, 最大: 100
+  offset?: string // 默认: 0
+  distinct?: string
+}
+
 // 查询参数
 export interface DataQueryParams {
-  table: string // 表名
-  orderBy: string // 默认: "id"
+  table?: string // 表名
+  orderBy?: string // 默认: "id"
   columns?: string[]
   where?: Where
   order?: string // 默认: false
