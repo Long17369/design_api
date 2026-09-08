@@ -11,6 +11,7 @@ import {
   errorResponse,
   handleCount,
   handleData,
+  handleDataDevices,
   handleNotImplemented,
   handleTable,
   handleTimeRange,
@@ -123,16 +124,16 @@ export class HttpServer implements Closable {
       )
     }
 
+    // 有数据上报的设备编号（d_no 去重列表，并入 sensor 资源）
+    this.app.get(
+      `${API_BASE}/sensor/devices`,
+      wrap((req, res) => handleDataDevices(this.db(), req, res)),
+    )
+
     // TODO: 指令(direct)相关接口暂未实现（后续接入 direct / direct_config）
     this.app.get(`${API_BASE}/direct/config`, wrap(handleNotImplemented))
     this.app.get(`${API_BASE}/direct/data`, wrap(handleNotImplemented))
     this.app.post(`${API_BASE}/direct/update`, wrap(handleNotImplemented))
-
-    // TODO: 设备(device)相关接口暂未实现（尚无 device 表）
-    this.app.get(`${API_BASE}/device`, wrap(handleNotImplemented))
-    this.app.post(`${API_BASE}/device`, wrap(handleNotImplemented))
-    this.app.put(`${API_BASE}/device`, wrap(handleNotImplemented))
-    this.app.delete(`${API_BASE}/device`, wrap(handleNotImplemented))
   }
 
   /** 统一错误响应 */

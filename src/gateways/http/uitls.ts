@@ -177,6 +177,27 @@ export async function handleTimeRange(
 }
 
 /**
+ * 处理 GET /sensor/devices —— 获取有数据上报的设备编号（d_no 去重列表）。
+ * 从 sensor 域（sensor_data）取数。
+ */
+export async function handleDataDevices(db: Database, _req: Request, res: Response): Promise<void> {
+  const rows = await db.executeQuery<{ d_no: string | null }>({
+    table: 'sensor_data',
+    columns: ['d_no'],
+    distinct: 'DISTINCT',
+    orderBy: 'd_no',
+    order: 'ASC',
+    limit: '100',
+    offset: '0',
+    where: { d_no: { operator: '!=', value: '' } },
+  })
+  const devices = rows
+    .map((row) => row.d_no)
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+  res.status(200).json(successResponse(devices))
+}
+
+/**
  * 未实现接口占位（注册路由但返回 501）
  */
 export async function handleNotImplemented(_req: Request, res: Response): Promise<void> {

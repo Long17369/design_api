@@ -79,17 +79,6 @@ export interface DataCount {
   count: number
 }
 
-export interface Device {
-  id: number
-  device_name: string
-  remarks: string | null
-  c_time: string
-  number: string
-}
-
-export type CreateDeviceParams = Omit<Device, 'id' | 'c_time'>
-export type UpdateDeviceParams = Partial<Omit<Device, 'id' | 'c_time'>>
-
 export type WhereOperator = '=' | '>' | '<' | '>=' | '<=' | '!='
 
 export interface WhereCondition {

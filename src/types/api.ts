@@ -2,10 +2,7 @@ import type {
   FieldMapper,
   Data,
   ApiResponse,
-  Device,
   DataCount,
-  CreateDeviceParams,
-  UpdateDeviceParams,
   DirectConfig,
   Direct,
   UpdateDirectParams,
@@ -113,48 +110,11 @@ export async function getTimeRange(
 }
 
 /**
- * 获取设备列表
- * @param params 查询参数
- * @returns Promise<Device[]>
+ * 获取有数据上报的设备编号（d_no 列表，用于设备选择/筛选）。
+ * 暂返回 sensor 域（sensor_data）中有上报数据的设备。
  */
-export const getDevice = (params?: { device_name?: string; number?: string }) => {
-  const queryString = new URLSearchParams(params).toString()
-  return fetchApi<Device[]>(`${BASE_URL}/device?${queryString}`)
-}
-
-/**
- * 新增设备
- * @param device 设备信息
- */
-export const addDevice = (device: CreateDeviceParams) => {
-  return fetchApi(`${BASE_URL}/device`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(device),
-  })
-}
-
-/**
- * 更新设备
- * @param id 设备ID
- * @param device 设备信息
- */
-export const updateDevice = (id: number, device: UpdateDeviceParams) => {
-  return fetchApi(`${BASE_URL}/device`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, ...device }),
-  })
-}
-
-/**
- * 删除设备
- * @param id 设备ID
- */
-export const deleteDevice = (id: number) => {
-  return fetchApi(`${BASE_URL}/device?id=${id}`, {
-    method: 'DELETE',
-  })
+export const getDataDevices = () => {
+  return fetchApi<string[]>(`${BASE_URL}/sensor/devices`)
 }
 
 /**
