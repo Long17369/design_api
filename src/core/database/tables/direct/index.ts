@@ -10,6 +10,7 @@ const additional_columns = [
     name: 'config_id',
     type: new ColumnTypeVARCHAR(64),
     desc: '指令配置码（对应 direct_config.code）',
+    references: { table: 'direct_config', column: 'code' },
   },
   {
     name: 'value',

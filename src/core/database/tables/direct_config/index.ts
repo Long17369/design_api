@@ -10,11 +10,14 @@ const additional_columns = [
     name: 'code',
     type: new ColumnTypeVARCHAR(64),
     desc: '指令配置码（业务唯一标识，如 auto/heat/water）',
+    notNull: true,
+    unique: true,
   },
   {
     name: 'ref_code',
     type: new ColumnTypeVARCHAR(64),
     desc: '关联的父指令配置码，若父配置的取值与此处吻合，则显示该指令',
+    references: { table: 'direct_config', column: 'code' },
   },
   {
     name: 'ref_value',

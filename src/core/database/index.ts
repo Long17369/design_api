@@ -11,6 +11,7 @@ import {
   buildWhereSQL,
   findTableInfo,
   isColumnAllowed,
+  sortTablesForCreate,
 } from './uitls'
 import { bus } from '@core/bus'
 import type { Closable } from '@core/lifecycle'
@@ -169,7 +170,7 @@ export class Database implements Closable {
       throw new Error('数据库连接未初始化')
     }
     const connection = this.connection
-    for (const table of tables) {
+    for (const table of sortTablesForCreate(tables)) {
       const existsRows = (await connection.query(
         `SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
         [table.name],

@@ -17,28 +17,89 @@ function quote(name: string): string {
 }
 
 /**
- * 生成单列定义（不含列名），如：varchar(255) NULL COMMENT '备注'
+ * 生成单列定义（不含列名），如：varchar(255) NOT NULL COMMENT '备注'
  * 数据类型来自 ColumnType.toSQL()，由代码定义生成，无需参数化，可安全拼入 DDL。
  */
 export function buildColumnDefinitionSQL(col: ColumnInfo): string {
   const type = col.type.toSQL()
-  const comment = col.desc ? ` COMMENT '${col.desc.replace(/'/g, "''")}'` : ''
-  return `${type} NULL${comment}`
+  const nullable = col.notNull ? 'NOT NULL' : 'NULL'
+  const comment = col.desc ? `COMMENT '${col.desc.replace(/'/g, "''")}'` : ''
+  return `${type} ${nullable}${comment}`
+}
+
+/** 取某表在创建前必须先存在的被引用表名集合（外键目标表） */
+function referencedTables(table: TableInfo): string[] {
+  const columns = [...(table.base_columns || []), ...(table.additional_columns || [])]
+  return columns.filter((col) => col.references).map((col) => col.references!.table)
 }
 
 /**
- * 生成完整建表语句（含自增主键 id 与全部基础/扩展列）
+ * 表创建顺序拓扑排序：被外键引用的表先建，避免 CREATE 时引用表不存在。
+ * 存在引用环时，余下按原顺序追加（不抛错）。
+ */
+export function sortTablesForCreate(tables: TableInfo[]): TableInfo[] {
+  const remaining = [...tables]
+  const done = new Set<string>()
+  const order: TableInfo[] = []
+  while (remaining.length > 0) {
+    let progressed = false
+    for (let i = 0; i < remaining.length; i++) {
+      const table = remaining[i]
+      if (!table) continue
+      const deps = referencedTables(table)
+      if (deps.every((dep) => dep === table.name || done.has(dep))) {
+        order.push(table)
+        done.add(table.name)
+        remaining.splice(i, 1)
+        progressed = true
+        break
+      }
+    }
+    if (!progressed) {
+      order.push(...remaining)
+      break
+    }
+  }
+  return order
+}
+
+/**
+ * 生成完整建表语句（含自增主键 id、非空/唯一/索引/外键等约束）
  */
 export function buildCreateTableSQL(table: TableInfo): string {
   const { name, base_columns, additional_columns } = table
-  const columnDefs = [...base_columns, ...(additional_columns || [])].map(
-    (col) => `  ${quote(col.name)} ${buildColumnDefinitionSQL(col)},`,
-  )
+  const columns = [...(base_columns || []), ...(additional_columns || [])]
+
+  const parts: string[] = [
+    `  ${quote('id')} INT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键，自动生成'`,
+    ...columns.map((col) => `  ${quote(col.name)} ${buildColumnDefinitionSQL(col)}`),
+    `  PRIMARY KEY (${quote('id')})`,
+  ]
+
+  // 唯一键
+  for (const col of columns) {
+    if (!col.unique) continue
+    parts.push(`  UNIQUE KEY ${quote(`uk_${name}_${col.name}`)} (${quote(col.name)})`)
+  }
+  // 普通索引（unique 列无需额外建索引）
+  for (const col of columns) {
+    if (col.index && !col.unique) {
+      parts.push(`  KEY ${quote(`idx_${name}_${col.name}`)} (${quote(col.name)})`)
+    }
+  }
+  // 外键
+  for (const col of columns) {
+    const ref = col.references
+    if (!ref) continue
+    let fk = `  CONSTRAINT ${quote(`fk_${name}_${col.name}`)} FOREIGN KEY (${quote(col.name)}) REFERENCES ${quote(ref.table)} (${quote(ref.column ?? col.name)})`
+    if (ref.onDelete) fk += ` ON DELETE ${ref.onDelete}`
+    if (ref.onUpdate) fk += ` ON UPDATE ${ref.onUpdate}`
+    parts.push(fk)
+  }
+
   return [
     `CREATE TABLE IF NOT EXISTS ${quote(name)} (`,
-    `  ${quote('id')} INT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键，自动生成',`,
-    ...columnDefs,
-    `  PRIMARY KEY (${quote('id')})`,
+    parts.join(',\n'),
     `) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_general_ci`,
   ].join('\n')
 }
