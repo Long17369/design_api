@@ -4,7 +4,7 @@ import { TableInfoBuilded } from '@core/database'
 import { ColumnInfo, TableInfo } from '@core/database/tables'
 import { SqlValue } from './tables'
 
-const logger = log.get_logger('Database')
+const logger = log.getLogger('Database')
 
 /** 单次查询允许返回的最大行数（与对外 API 约定一致） */
 const MAX_QUERY_LIMIT = 100

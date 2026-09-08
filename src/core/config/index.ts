@@ -3,7 +3,7 @@ import path from 'node:path'
 import Ajv from 'ajv'
 import { log } from '@core/logger'
 
-const logger = log.get_logger('Config')
+const logger = log.getLogger('Config')
 
 /** 解析 '@root/...' 等 tsconfig paths 别名为项目根下的真实路径（开发期以进程工作目录为根） */
 function resolveConfigPath(p: string): string {

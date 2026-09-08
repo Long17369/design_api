@@ -5,7 +5,7 @@ import { bus } from '@core/bus'
 import { Closable } from '@core/lifecycle'
 import { WsAlarm, WsEventType, WsMessage, WsMessageData } from '@/types/types'
 
-const logger = log.get_logger('WebSocketServer')
+const logger = log.getLogger('WebSocketServer')
 
 export class WebSocketServer implements Closable {
   private wss: WServer | null = null

@@ -17,10 +17,10 @@ import {
   handleDirectUpdate,
   handleTable,
   handleTimeRange,
-} from './uitls'
+} from './utils'
 import { DataSourceDef, RouteHandler } from '.'
 
-const logger = log.get_logger('HttpServer')
+const logger = log.getLogger('HttpServer')
 
 /** 对外接口统一前缀，与前端 api.ts 的 BASE_URL 保持一致 */
 const API_BASE = '/api'

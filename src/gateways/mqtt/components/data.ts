@@ -2,7 +2,7 @@ import { log } from '@core/logger'
 import { DataTopicPayload } from './data'
 
 const topic = 'data/'
-const logger = log.get_logger('MQTTDataTopic')
+const logger = log.getLogger('MQTTDataTopic')
 
 // TODO: 完成数据处理
 const handle = async (message: DataTopicPayload) => {

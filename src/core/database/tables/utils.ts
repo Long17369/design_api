@@ -1,4 +1,4 @@
-import { ColumnTypeVARCHAR } from './types'
+import { ColumnTypeVARCHAR } from './columns'
 import { ColumnInfo } from '@core/database/tables'
 
 /**

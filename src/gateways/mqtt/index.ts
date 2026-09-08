@@ -5,7 +5,7 @@ import { Closable } from '@core/lifecycle'
 import { MQTTConfig, MQTTMessageOut, TopicHandlers } from '.'
 import topics from './components'
 
-const logger = log.get_logger('MqttGateway')
+const logger = log.getLogger('MqttGateway')
 
 export class MqttGateway implements Closable {
   private client: mqtt.MqttClient | null = null

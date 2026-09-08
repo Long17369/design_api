@@ -2,7 +2,7 @@ import { DatabaseConfig } from '.'
 import { log } from '@core/logger'
 import mysql from 'mysql2/promise'
 import tables, { tableTools } from './tables'
-import { TableTools } from './tables/types'
+import { TableTools } from './tables/columns'
 import { SqlValue, WriteResult } from './tables'
 import {
   buildAlterAddColumnSQL,
@@ -14,14 +14,14 @@ import {
   isColumnAllowed,
   quote,
   sortTablesForCreate,
-} from './uitls'
+} from './utils'
 import { bus } from '@core/bus'
 import { Closable } from '@core/lifecycle'
 import { DataQueryParams, Where } from '@/types/types'
 import { TableInfoBuilded } from '.'
 import { TABLE_SEEDS, TableSeed } from './seeds'
 
-const logger = log.get_logger('Database')
+const logger = log.getLogger('Database')
 
 export class Database implements Closable {
   private config: DatabaseConfig | null = null

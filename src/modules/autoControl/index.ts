@@ -2,7 +2,7 @@ import { bus } from '@core/bus'
 import { log } from '@core/logger'
 import { Closable } from '@core/lifecycle'
 
-const logger = log.get_logger('AutoControlModule')
+const logger = log.getLogger('AutoControlModule')
 
 export class AutoControlModule implements Closable {
   /** 事件订阅注销句柄集合（强引用监听；close 时统一注销） */

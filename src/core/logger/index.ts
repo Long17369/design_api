@@ -327,6 +327,6 @@ class NamedLogger {
 const rootLogger = new Logger()
 
 export const log = {
-  get_logger: (name: string) => new NamedLogger(name, rootLogger),
+  getLogger: (name: string) => new NamedLogger(name, rootLogger),
   stop: () => rootLogger.waitForTasks(),
 }

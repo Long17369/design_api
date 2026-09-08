@@ -3,7 +3,7 @@ import { log } from '@core/logger'
 
 import { EventHandlerMapper } from '.'
 
-const logger = log.get_logger('EventService')
+const logger = log.getLogger('EventService')
 
 export class EventBus extends EventEmitter {
   constructor() {

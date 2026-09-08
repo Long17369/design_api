@@ -1,4 +1,4 @@
-import { ColumnTypeDateTime, ColumnTypeVARCHAR } from '../types'
+import { ColumnTypeDateTime, ColumnTypeVARCHAR } from '../columns'
 import { ColumnInfo } from '@core/database/tables'
 
 const name = 'direct'

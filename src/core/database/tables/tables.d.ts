@@ -4,7 +4,7 @@ import {
   ColumnTypeVARCHAR,
   ColumnTypeENUM,
   ColumnTypeDateTime,
-} from './types'
+} from './columns'
 
 declare module '@core/database/tables' {
   /** 数据库字段值：可作为参数化 SQL 的占位符值 */

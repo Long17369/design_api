@@ -15,7 +15,7 @@ import {
   validateValue,
 } from './utils'
 
-const logger = log.get_logger('DirectModule')
+const logger = log.getLogger('DirectModule')
 
 export { DirectModuleError }
 

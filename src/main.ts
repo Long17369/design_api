@@ -5,7 +5,7 @@ import { log } from '@core/logger'
 import { MqttGateway, HttpServer, WebSocketServer } from '@gateways'
 import { AlarmModule, AutoControlModule, DirectModule } from '@modules'
 
-const logger = log.get_logger('Main')
+const logger = log.getLogger('Main')
 
 async function main() {
   const config = new Config('@root/config.json')

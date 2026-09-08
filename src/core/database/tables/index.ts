@@ -6,7 +6,7 @@ import {
   ColumnTypeENUM,
   ColumnTypeDateTime,
   TableTools,
-} from './types'
+} from './columns'
 
 import { TableInfo } from '.'
 import behavior_data from './behavior_data'

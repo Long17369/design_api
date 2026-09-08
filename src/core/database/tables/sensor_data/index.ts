@@ -1,4 +1,4 @@
-import { ColumnTypeDateTime, ColumnTypeVARCHAR } from '../types'
+import { ColumnTypeDateTime, ColumnTypeVARCHAR } from '../columns'
 import { generateFields } from '../utils'
 
 const name = 'sensor_data'
