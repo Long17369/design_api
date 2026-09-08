@@ -217,13 +217,12 @@ export class Database implements Closable {
   }
 
   /**
-   * 执行原始 SQL，返回 [行结果, 字段信息]。
-   * 特殊聚合查询（如图表时间桶降采样）可通过本方法实现。
+   * 执行原始 SQL（内部使用），返回 [行结果, 字段信息]。
    * @param sql sql查询语句
    * @param params sql查询参数
    * @returns 查询结果
    */
-  public async query(sql: string, params?: SqlValue[]): Promise<[unknown, unknown]> {
+  private async query(sql: string, params?: SqlValue[]): Promise<[unknown, unknown]> {
     const connection = await this.ensureReady()
     if (params === undefined) {
       return (await connection.query(sql)) as [unknown, unknown]

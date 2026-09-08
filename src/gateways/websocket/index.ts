@@ -138,8 +138,8 @@ export class WebSocketServer implements Closable {
     }
   }
 
-  /** 向单个客户端发送消息 */
-  public sendTo(ws: WebSocket, event: WsEventType, data: WsMessageData) {
+  /** 向单个客户端发送消息（内部使用；对外推送统一经 bus 'WSMessageOUT' 事件） */
+  private sendTo(ws: WebSocket, event: WsEventType, data: WsMessageData) {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ event, data }))
     }

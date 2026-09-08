@@ -24,7 +24,7 @@ const API_BASE = '/api'
 type RouteHandler = (req: Request, res: Response) => Promise<void>
 
 export class HttpServer implements Closable {
-  app: express.Express
+  private app: express.Express
   private database: Database | null = null
   private server: http.Server | null = null
 
