@@ -1,0 +1,129 @@
+import { DirectConfigRow } from '.'
+import { DataQueryParams, DirectConfig, Where } from '@/types/types'
+
+/** Direct 模块业务错误（默认 400 参数类错误，由 HTTP 层映射为 INVALID_PARAMS） */
+export class DirectModuleError extends Error {
+  public readonly status: number
+
+  constructor(message: string, status: number = 400) {
+    super(message)
+    this.name = 'DirectModuleError'
+    this.status = status
+  }
+}
+
+/** 数据库行 → 前端 DirectConfig 契约（code/ref_code 映射为 id/ref_id） */
+export function toConfig(row: DirectConfigRow): DirectConfig {
+  return {
+    id: row.code,
+    ref_id: row.ref_code,
+    ref_value: row.ref_value,
+    t_name: row.t_name ?? '',
+    f_type: row.f_type ?? '',
+    f_value: row.f_value,
+    mode: row.mode,
+    max: row.max,
+    min: row.min,
+    order: row.order ?? '',
+    topic: row.topic,
+    preffix: row.preffix,
+    icon: row.icon,
+    type: toConfigType(row.type),
+    default_value: row.default_value,
+  }
+}
+
+/** 数据库 type 列 → 前端契约的数据类型（未知值回退 string） */
+export function toConfigType(type: string | null): DirectConfig['type'] {
+  if (type === 'int' || type === 'float' || type === 'string') {
+    return type
+  }
+  return 'string'
+}
+
+/**
+ * 校验指令值并返回规范化字符串
+ */
+export function validateValue(config: DirectConfig, value: string | number): string {
+  const raw = typeof value === 'number' ? String(value) : (value ?? '')
+
+  if (config.type === 'int') {
+    const intVal = Number.parseInt(raw, 10)
+    if (Number.isNaN(intVal) || String(intVal) !== raw.trim()) {
+      throw new DirectModuleError(`[${config.id}] 指令值必须为整数`)
+    }
+    return String(intVal)
+  }
+  if (config.type === 'float') {
+    if (Number.isNaN(Number.parseFloat(raw))) {
+      throw new DirectModuleError(`[${config.id}] 指令值必须为数字`)
+    }
+    return raw.trim()
+  }
+
+  // 开关(1) / 单选框(5)：取值需在 f_value 声明的选项中
+  if (config.f_type === '1' || config.f_type === '5') {
+    if (config.f_value) {
+      const options: string[] = []
+      for (const opt of config.f_value.split('|')) {
+        const parts = opt.split(':')
+        options.push(parts.length > 1 && parts[1] !== undefined ? parts[1] : parts[0]!)
+      }
+      if (!options.includes(raw)) {
+        throw new DirectModuleError(`[${config.id}] 指令值需为以下之一: ${options.join(', ')}`)
+      }
+    }
+  }
+
+  return raw
+}
+
+// ========== 查询参数构造 ==========
+
+/** 查询公共参数：按 id 升序，最多 100 条 */
+const QUERY_BASE = { orderBy: 'id', order: 'ASC', limit: '100', offset: '0' } as const
+
+/** direct_config 全量列表查询参数 */
+export const CONFIG_LIST_QUERY: DataQueryParams = {
+  table: 'direct_config',
+  ...QUERY_BASE,
+}
+
+/** direct_config 按业务码精确查询（取 1 条） */
+export function configByCodeQuery(code: string): DataQueryParams {
+  return {
+    table: 'direct_config',
+    ...QUERY_BASE,
+    limit: '1',
+    where: { code: { operator: '=', value: code } },
+  }
+}
+
+/** direct 表按设备查询指令值 */
+export function deviceDataQuery(d_no: string): DataQueryParams {
+  return {
+    table: 'direct',
+    columns: ['id', 'config_id', 'value', 'd_no'],
+    ...QUERY_BASE,
+    where: { d_no: { operator: '=', value: d_no } },
+  }
+}
+
+/** direct 表按「配置码 + 设备」唯一定位条件 */
+export function directKeyWhere(config_id: string, d_no: string): Where {
+  return {
+    config_id: { operator: '=', value: config_id },
+    d_no: { operator: '=', value: d_no },
+  }
+}
+
+/** direct 表按「配置码 + 设备」取 1 条的查询参数 */
+export function directKeyQuery(config_id: string, d_no: string): DataQueryParams {
+  return {
+    table: 'direct',
+    columns: ['id'],
+    ...QUERY_BASE,
+    limit: '1',
+    where: directKeyWhere(config_id, d_no),
+  }
+}
