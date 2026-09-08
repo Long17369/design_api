@@ -23,7 +23,7 @@ export function quote(name: string): string {
 export function buildColumnDefinitionSQL(col: ColumnInfo): string {
   const type = col.type.toSQL()
   const nullable = col.notNull ? 'NOT NULL' : 'NULL'
-  const comment = col.desc ? `COMMENT '${col.desc.replace(/'/g, "''")}'` : ''
+  const comment = col.desc ? ` COMMENT '${col.desc.replace(/'/g, "''")}'` : ''
   return `${type} ${nullable}${comment}`
 }
 

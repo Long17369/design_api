@@ -37,6 +37,7 @@ export interface FieldMapper {
   f_name: string // 显示名称
   db_name: DbName // 数据库字段名
   p_name: string // 内部字段名
+  api_name?: string | null // 后端字段名（对应 MQTT 上报 payload 的键，如 temp_in）
   unit: string // 单位
   type: '1' | '2' | '3' // 1: 文本, 2: 图片, 3: 视频
   visible: '0' | '1' // 0: 不可见, 1: 可见
