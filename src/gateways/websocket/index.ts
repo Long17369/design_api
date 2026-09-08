@@ -1,98 +1,138 @@
 import { Server } from 'http'
+import { randomUUID } from 'node:crypto'
 import { WebSocketServer as WServer, WebSocket } from 'ws'
 import { log } from '@core/logger'
 import { bus } from '@core/bus'
 import { Closable } from '@core/lifecycle'
-import { WsAlarm, WsEventType, WsMessage, WsMessageData } from '@/types/types'
+import { WsMessage } from '@/types/types'
+import { WsPush } from '@gateways/websocket'
+import { buildWelcomeMessage, parseGoalFromUrl, serializeMessage } from './utils'
 
 const logger = log.getLogger('WebSocketServer')
 
 export class WebSocketServer implements Closable {
   private wss: WServer | null = null
-  private clients: Set<WebSocket> = new Set()
+  /** 已连接客户端 → 后端为该连接分配的 goal token */
+  private readonly clients = new Map<WebSocket, string>()
+  /** goal token → 客户端（定向推送用） */
+  private readonly goalIndex = new Map<string, WebSocket>()
 
   /** 事件订阅注销句柄集合（强引用监听；close 时统一注销） */
   private readonly unsubscribers: Array<() => void> = []
 
   constructor() {
+    logger.info('WebSocket 网关已注册')
     this.unsubscribers.push(
       bus.onEvent('shutdown', () => {
         this.close()
       }),
+      bus.onEvent('WS_MESSAGE_OUT', (push) => {
+        this.dispatch(push)
+      }),
     )
   }
 
-  public attach(server: Server) {
-    this.wss = new WServer({ server: server })
+  /** 挂载到 HTTP server（main.ts 中在 http.bindServer() 之后调用） */
+  public attach(server: Server): void {
+    this.wss = new WServer({
+      server,
+      // 握手校验：URL ?goal=<旧token> 若仍被活跃连接占用，则拒绝握手
+      verifyClient: (info, done) => {
+        const token = parseGoalFromUrl(info.req.url)
+        if (token && this.isGoalActive(token)) {
+          logger.warn(`拒绝重连：goal=${token} 仍有活跃连接`)
+          done(false, 403, 'Goal already in use')
+          return
+        }
+        done(true)
+      },
+    })
 
     this.wss.on('connection', async (ws, req) => {
       const ip = req.socket.remoteAddress || 'unknown'
-      logger.info(`WebSocket 客户端已连接: ${ip}`)
-      this.clients.add(ws)
-
-      // 发送欢迎消息确认连接
-      ws.send(
-        JSON.stringify({
-          event: 'connected',
-          data: { message: 'WebSocket 连接成功', timestamp: new Date().toISOString() },
-        }),
+      // 携带旧 token 且未被占用则复用（先清理其残留的非活跃映射），否则分配新 token
+      const oldGoal = parseGoalFromUrl(req.url)
+      const stale = oldGoal ? this.goalIndex.get(oldGoal) : undefined
+      if (stale) this.removeClient(stale)
+      const goal = oldGoal ?? randomUUID()
+      this.clients.set(ws, goal)
+      this.goalIndex.set(goal, ws)
+      logger.info(
+        `${oldGoal ? '复用旧 goal 重连' : 'WebSocket 客户端已连接'}: ${ip} (goal=${goal})`,
       )
 
-      // 补推持久化的堵塞预警（前端断开重连后恢复实时横幅；id 与 t_error_msg.c_time 绑定，前端去重）
+      // 下发欢迎消息（携带 goal，供业务侧定向推送）
+      ws.send(JSON.stringify(buildWelcomeMessage(goal)))
+
+      // 通知业务侧：客户端已连接（携带 goal，可用于后续定向推送）
+      bus.emitEvent('WS_CLIENT_CONNECTED', { goal, ip })
+
+      // 补推持久化的堵塞预警（前端断开重连后恢复实时横幅）
       await this.pushBlockedAlarms(ws)
 
       ws.on('close', () => {
-        logger.info(`WebSocket 客户端已断开: ${ip}`)
-        this.clients.delete(ws)
+        logger.info(`WebSocket 客户端已断开: ${ip} (goal=${goal})`)
+        this.removeClient(ws)
       })
 
       ws.on('error', (err) => {
         logger.error('WebSocket 客户端错误:', err)
-        this.clients.delete(ws)
+        this.removeClient(ws)
       })
 
       ws.on('message', (data) => {
+        let payload: unknown
         try {
-          const msg = JSON.parse(data.toString()) as object
-          logger.debug(`收到客户端消息:`, msg)
-          // 预留：处理客户端请求（如请求特定设备数据）
+          payload = JSON.parse(data.toString())
         } catch {
           logger.debug('收到非 JSON 客户端消息，忽略')
+          return
         }
+        logger.debug(`收到客户端消息 (goal=${goal}):`, payload)
+        bus.emitEvent('WS_MESSAGE_IN', { goal, payload })
       })
     })
-
-    this.unsubscribers.push(
-      bus.onEvent('WSMessageOUT', (message) => {
-        this.broadcast(message.event, message.data)
-      }),
-    )
 
     logger.info('WebSocket 服务已启动')
   }
 
   /**
-   * 释放资源：退订 WSMessageOUT、断开所有客户端并关闭 wss
+   * 释放资源：退订 WS_MESSAGE_OUT、断开所有客户端并关闭 wss
    */
   public close(): void {
     this.unsubscribers.splice(0).forEach((unsubscribe) => unsubscribe())
-    for (const client of this.clients) {
+    for (const client of this.clients.keys()) {
       client.terminate()
     }
     this.clients.clear()
+    this.goalIndex.clear()
     this.wss?.close()
     this.wss = null
   }
 
-  /** 向所有已连接客户端广播消息 */
-  private broadcast(event: WsEventType, data: WsMessageData) {
-    if (!this.wss) return
+  /** 分发推送：带 goal 定向，无 goal 广播；下发给客户端的只有 message（不含 goal） */
+  private dispatch(push: WsPush): void {
+    const { goal, message } = push
+    if (goal) {
+      const ws = this.goalIndex.get(goal)
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        logger.warn(`未找到 goal=${goal} 对应的 WebSocket 客户端，消息已丢弃`)
+        return
+      }
+      ws.send(serializeMessage(message))
+      logger.debug(`定向推送事件 "${message.event}" 至 goal=${goal}`)
+      return
+    }
 
-    const message: WsMessage = { event, data }
-    const text = JSON.stringify(message)
+    this.broadcast(message)
+  }
+
+  /** 向所有已连接客户端广播消息 */
+  private broadcast(message: WsMessage): void {
+    const text = serializeMessage(message)
 
     let sent = 0
-    for (const ws of this.clients) {
+    for (const ws of this.clients.keys()) {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(text)
         sent++
@@ -100,55 +140,29 @@ export class WebSocketServer implements Closable {
     }
 
     if (sent > 0) {
-      logger.debug(`广播事件 "${event}" 至 ${sent} 个客户端`)
+      logger.debug(`广播事件 "${message.event}" 至 ${sent} 个客户端`)
     }
+  }
+
+  /** 注销客户端并回收 goal 映射 */
+  private removeClient(ws: WebSocket): void {
+    const goal = this.clients.get(ws)
+    this.clients.delete(ws)
+    if (goal) this.goalIndex.delete(goal)
+  }
+
+  /** goal 是否被活跃连接占用 */
+  private isGoalActive(goal: string): boolean {
+    const ws = this.goalIndex.get(goal)
+    return !!ws && ws.readyState === WebSocket.OPEN
   }
 
   /**
-   * 补推所有处于堵塞状态的设备预警（WS 连接时调用）
-   * id 复用 t_error_msg 中预警发生的 c_time，与首次推送一致，前端据此去重不重复添加
-   * // TODO: 移入 AlarmModule
+   * 补推所有处于堵塞状态的设备预警（WS 连接时调用）。
+   * // TODO: 移入 AlarmModule 并接入 Database 实现（表 direct / error_msg）；
+   *       当前为占位，不再使用旧表名 t_direct/t_error_msg 的裸 SQL。
    */
-  private async pushBlockedAlarms(ws: WebSocket) {
-    try {
-      const blockedRows = (await query(
-        "SELECT d_no FROM t_direct WHERE config_id = 'blocked' AND value = '1'",
-      )) as Array<{ d_no: string }>
-      for (const row of blockedRows) {
-        const errs = (await query(
-          `SELECT DATE_FORMAT(c_time, '%Y-%m-%d %H:%i:%s') AS c_time_str, field1
-           FROM t_error_msg WHERE d_no = ? AND field3 = 'block' ORDER BY id DESC LIMIT 1`,
-          [row.d_no],
-        )) as Array<{ c_time_str: string; field1: string }>
-        const latest = errs[0]
-        if (latest) {
-          const alarm: WsAlarm = {
-            id: `alarm_${row.d_no}_${latest.c_time_str}`,
-            d_no: row.d_no,
-            type: 'alarm',
-            message: latest.field1,
-            timestamp: latest.c_time_str,
-          }
-          this.sendTo(ws, 'alarm', alarm)
-          logger.info(`补推堵塞预警: ${row.d_no}`)
-        }
-      }
-    } catch (err) {
-      logger.error('补推堵塞预警失败:', err)
-    }
+  private async pushBlockedAlarms(ws: WebSocket): Promise<void> {
+    logger.debug(`补推堵塞预警暂未实现 (client readyState=${ws.readyState})`)
   }
-
-  /** 向单个客户端发送消息（内部使用；对外推送统一经 bus 'WSMessageOUT' 事件） */
-  private sendTo(ws: WebSocket, event: WsEventType, data: WsMessageData) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ event, data }))
-    }
-  }
-}
-
-function query(sql: string, params?: (string | number)[]) {
-  logger.warn('数据库查询函数 query() 尚未实现，返回空结果, 查询SQL:', sql, '参数:', params)
-  return new Promise((resolve) => {
-    resolve([]) // TODO: 实现数据库查询
-  })
 }
