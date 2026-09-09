@@ -1,4 +1,5 @@
 import { DataTopicPayload } from './data'
+import { DataPayload } from '@/types/types'
 
 declare module '@gateways/mqtt/components/data' {
   interface DataTopicPayload {
@@ -33,5 +34,12 @@ declare module '@gateways/mqtt/components' {
 declare module '@gateways/mqtt' {
   interface MQTTMessageMapper {
     'data/': DataTopicPayload
+  }
+}
+
+declare module '@core/bus' {
+  interface EventHandlerMapper {
+    /** 传感器原始上报数据（MQTT data/ 主题载荷，未经业务处理） */
+    SENSOR_DATA_RAW: DataPayload
   }
 }

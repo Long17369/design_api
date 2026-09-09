@@ -3,7 +3,7 @@ import { Config } from '@core/config'
 import { Database } from '@core/database'
 import { log } from '@core/logger'
 import { MqttGateway, HttpServer, WebSocketServer } from '@gateways'
-import { AlarmModule, AutoControlModule, DirectModule } from '@modules'
+import { AlarmModule, AutoControlModule, DirectModule, SensorModule } from '@modules'
 
 const logger = log.getLogger('Main')
 
@@ -30,6 +30,8 @@ async function main() {
   })
 
   // 2. 注册所有模块（构造时订阅 bus 'shutdown' 事件）
+  const sensorModule = new SensorModule()
+  sensorModule.setDatabase(database)
   new AlarmModule()
   new AutoControlModule()
 
