@@ -11,6 +11,7 @@ import {
   calcAvgFlow,
   calcHeatRate,
   fmt,
+  hasSpike,
   intOr,
   parseTime,
   pushSample,
@@ -105,6 +106,14 @@ export class SensorModule implements Closable {
       avg_flow: calcAvgFlow(state.flowSamples, config.avgFlowWindow, now),
     }
 
+    // 2.5 跳变检测（数据质量标记 invalid：多帧累计 + 防抖，关闭时不参与）
+    if (config.spikeFrames > 0) {
+      if (state.lastRaw && hasSpike(state.lastRaw, raw, config)) state.spikeCount += 1
+      else state.spikeCount = 0
+      if (state.spikeCount >= config.spikeFrames) data.invalid = true
+    }
+    state.lastRaw = raw
+
     // 3. 落库（按 mapper 的 api_name→db_name 映射组装行）
     const row = buildSensorRow(raw, mapper, totalFlow)
     if (Object.keys(row).length > 0) {
@@ -123,7 +132,14 @@ export class SensorModule implements Closable {
   private getState(dNo: string): DeviceState {
     let state = this.devices.get(dNo)
     if (!state) {
-      state = { lastTime: null, totalFlow: 0, tempSamples: [], flowSamples: [] }
+      state = {
+        lastTime: null,
+        totalFlow: 0,
+        tempSamples: [],
+        flowSamples: [],
+        lastRaw: null,
+        spikeCount: 0,
+      }
       this.devices.set(dNo, state)
     }
     return state
@@ -146,6 +162,10 @@ export class SensorModule implements Closable {
         return {
           heatRateWindow: intOr(byCode.get('heat_rate_window'), 60),
           avgFlowWindow: intOr(byCode.get('avg_flow_window'), 60),
+          spikeFrames: intOr(byCode.get('sensor_spike_frames'), 0),
+          spikeTemp: toNum(byCode.get('sensor_spike_temp')) ?? 10,
+          spikePressure: toNum(byCode.get('sensor_spike_pressure')) ?? 20,
+          spikeFlow: toNum(byCode.get('sensor_spike_flow')) ?? 100,
         }
       },
       { tag: 'direct_config' },
