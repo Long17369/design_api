@@ -20,8 +20,8 @@
 - [ ] `pumpIdle` 水泵空转：**合并进 `flowZero`**（同一「流量归零」判定链，不新开组件）；去抖时长（N 秒/N 帧）做成开关
 - [ ] `pfMismatch` 压力流量不匹配：**暂缓** —— 等真实数据标定 X/Y 阈值后再做（「建议降功率」需设备支持调速，暂不做）
 - [ ] `pidTemp` PID 控温：完整 PID + PWM 开关加热；每次切换都会下发指令，需先评估下发频率上限
-- [ ] 组件状态自持重构：把组件的计时/激活态从共享 `DeviceState` 收回组件内部（**优先于新组件开工**，但排在当前收尾之后）
-- [ ] 组件 `history` 需求接口：组件可声明「需要的历史长度」（允许空实现），引擎取所有组件需求的最大值统一裁剪；`history` 仍共享
+- [x] 组件状态自持重构：计时/激活态已从共享 `DeviceState` 收回组件内部（`flowUnchanged` 计时、`flowTarget` 已达目标标记），`DeviceState` 只留引擎级字段（`pumpOn`/`pumpStartedAt`/`blocked`/`history`）；引擎 `close()` 统一调组件 `clearState()`
+- [x] 组件 `history` 需求接口：`AutoComponent.historyLength?(ctx)`（可空实现，默认 1 帧），引擎取所有组件需求的最大值统一裁剪（`tempAnomaly` 声明 `temp1RiseCount + 1`）；`history` 仍共享
 
 ## 自动控制 · 引擎与阈值配置（`autoControl/index.ts`、`utils.ts`）
 
