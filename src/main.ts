@@ -32,8 +32,10 @@ async function main() {
   // 2. 注册所有模块（构造时订阅 bus 'shutdown' 事件）
   const sensorModule = new SensorModule()
   sensorModule.setDatabase(database)
+  const autoControl = new AutoControlModule()
+  autoControl.setDatabase(database)
+  autoControl.setDirectModule(directModule)
   new AlarmModule()
-  new AutoControlModule()
 
   // 3. 优雅关闭：标准事件通知 —— main 只负责触发 'shutdown' 事件，
   //    各模块（构造时订阅）收到通知后自行 close 释放资源
