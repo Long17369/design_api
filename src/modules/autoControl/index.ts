@@ -7,7 +7,15 @@ import { lockManager } from '@core/locks'
 import { LockSnapshot } from '@core/locks'
 import { DirectModule } from '@modules/directModule'
 import { WsData } from '@/types/types'
-import { AutoConfig, AutoCtx, AutoDecision, ControlAction, DeviceState } from '@modules/autoControl'
+import {
+  AlarmDef,
+  AutoConfig,
+  AutoCtx,
+  AutoDecision,
+  ControlAction,
+  DeviceSeen,
+  DeviceState,
+} from '@modules/autoControl'
 import { autoComponents } from './components'
 import { buildAutoConfig, loadConfigDefaults, pushHistory, sendAlarm, setControl } from './utils'
 
@@ -15,6 +23,26 @@ const logger = log.getLogger('AutoControlModule')
 
 /** 阈值配置默认值缓存 key（tag = direct_config，写库时自动失效） */
 const CONFIG_DEFAULTS_KEY = 'autoControl:configDefaults'
+
+/** 离线扫描定时器间隔(ms)：轻量 5s 扫描，不做「暂停自动控制」等重机制 */
+const OFFLINE_SCAN_MS = 5_000
+
+/** 离线告警定义 */
+const OFFLINE_ALARM = (seconds: number): AlarmDef => ({
+  code: 'sensor_offline',
+  level: 'warning',
+  message: `设备离线：超过 ${seconds}s 未上报数据`,
+  category: 'offline',
+})
+
+/** 离线恢复推送（type='reset' → 前端清除该设备横幅） */
+const OFFLINE_RECOVERED: AlarmDef = {
+  code: 'sensor_online',
+  level: 'warning',
+  message: '设备已恢复上报',
+  category: 'offline',
+  type: 'reset',
+}
 
 /**
  * 自动控制模块：
@@ -26,6 +54,10 @@ export class AutoControlModule implements Closable {
 
   /** 各设备运行状态 */
   private readonly devices = new Map<string, DeviceState>()
+  /** 各设备最近上报时刻（离线告警用；按上报驱动更新，定时器只读） */
+  private readonly seen = new Map<string, DeviceSeen>()
+  /** 离线扫描定时器（unref：不阻塞进程退出） */
+  private readonly offlineTimer: ReturnType<typeof setInterval>
   /** 串行处理链，保证按时序处理 */
   private queue: Promise<void> = Promise.resolve()
 
@@ -42,6 +74,15 @@ export class AutoControlModule implements Closable {
         this.enqueue(data)
       }),
     )
+    // 离线监控：轻量定时器扫描（无数据库时自动跳过；unref 避免阻塞退出）
+    this.offlineTimer = setInterval(() => {
+      this.queue = this.queue
+        .then(() => this.checkOffline())
+        .catch((err: unknown) => {
+          logger.error('离线扫描失败:', err)
+        })
+    }, OFFLINE_SCAN_MS)
+    this.offlineTimer.unref()
   }
 
   /** 注入数据库实例（记录告警/控制日志用） */
@@ -57,7 +98,9 @@ export class AutoControlModule implements Closable {
   /** 释放资源：统一注销所有事件订阅、清空设备状态与组件内部状态 */
   public close(): void {
     this.unsubscribers.splice(0).forEach((unsubscribe) => unsubscribe())
+    clearInterval(this.offlineTimer)
     this.devices.clear()
+    this.seen.clear()
     for (const comp of autoComponents) comp.clearState?.()
     this.queue = Promise.resolve()
   }
@@ -80,6 +123,22 @@ export class AutoControlModule implements Closable {
     // 设备级 auto 开关：未开启则跳过
     const direct = await dm.listByDevice(dNo)
     const values = new Map(direct.map((row) => [row.config_id, row.value ?? '']))
+
+    // 离线监控：记录本次上报；若之前判定离线则推送「已恢复」（type='reset'）
+    const now0 = Date.now()
+    const previous = this.seen.get(dNo)
+    if (previous) {
+      previous.at = now0
+      previous.values = values
+      if (previous.offline) {
+        previous.offline = false
+        logger.info(`设备已恢复上报: ${dNo}`)
+        await sendAlarm(db, dNo, OFFLINE_RECOVERED, '恢复上报')
+      }
+    } else {
+      this.seen.set(dNo, { at: now0, offline: false, values })
+    }
+
     if (values.get('auto') !== '1') {
       logger.debug(`自动控制未开启，跳过: ${dNo}`)
       return
@@ -256,6 +315,31 @@ export class AutoControlModule implements Closable {
   /** 是否处于水泵启动宽限期内（仅水泵刚启动时允许宽限） */
   private inPumpGrace(state: DeviceState, cfg: AutoConfig, now: number): boolean {
     return state.pumpStartedAt !== null && now - state.pumpStartedAt < cfg.pumpStartGrace * 1000
+  }
+
+  /**
+   * 离线扫描（定时器驱动）：超过 `sensor_offline_seconds` 未上报即告警一次。
+   * 阈值按设备级覆盖取值（`seen.values` 为该设备最近一次的指令值快照）。
+   * 仅告警，不暂停自动控制（本引擎由上报驱动，不会用旧数据决策）。
+   */
+  private async checkOffline(): Promise<void> {
+    const db = this.database
+    if (!db || this.seen.size === 0) return
+    const defaults = await cache.remember(CONFIG_DEFAULTS_KEY, () => loadConfigDefaults(db), {
+      tag: 'direct_config',
+    })
+
+    const now = Date.now()
+    for (const [dNo, record] of this.seen) {
+      if (record.offline) continue
+      const cfg = buildAutoConfig(defaults, record.values)
+      if (cfg.sensorOfflineSeconds <= 0) continue
+      if (now - record.at < cfg.sensorOfflineSeconds * 1000) continue
+
+      record.offline = true
+      logger.info(`设备离线告警: ${dNo}（${Math.round((now - record.at) / 1000)}s 未上报）`)
+      await sendAlarm(db, dNo, OFFLINE_ALARM(cfg.sensorOfflineSeconds), '超时未上报')
+    }
   }
 
   /**

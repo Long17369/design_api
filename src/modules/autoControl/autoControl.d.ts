@@ -69,6 +69,8 @@ declare module '@modules/autoControl' {
     pumpStartGrace: number
     /** 累计流量不变持续秒数（超过视为堵塞） */
     flowUnchangedSeconds: number
+    /** 设备离线判定秒数：超过该时长未上报即告警（5s 定时器扫描）；0 = 关闭该告警 */
+    sensorOfflineSeconds: number
     /** 温度异常判定：升温1 连续上升次数 */
     temp1RiseCount: number
     /** 温度异常判定：升温2 允许波动(°C) */
@@ -89,6 +91,16 @@ declare module '@modules/autoControl' {
     flowTargetEnabled: boolean
     /** 累计流量目标(L)：达到即关水泵（连带关加热） */
     totalFlowTarget: number
+  }
+
+  /** 设备上报轨迹（离线监控用） */
+  interface DeviceSeen {
+    /** 最近一次上报时刻(ms) */
+    at: number
+    /** 是否已判定离线（防止按扫描周期重复告警） */
+    offline: boolean
+    /** 最近一次该设备的指令值快照（用于取其设备级离线阈值） */
+    values: Map<string, string>
   }
 
   /** 单设备运行状态（仅引擎级状态；组件私有计时/激活态由各组件自持） */

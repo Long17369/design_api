@@ -51,6 +51,7 @@ export function buildAutoConfig(
     pumpIdleSeconds: numOr('pump_idle_seconds', 60),
     pumpStartGrace: numOr('pump_start_grace', 10),
     flowUnchangedSeconds: numOr('flow_unchanged_seconds', 15),
+    sensorOfflineSeconds: numOr('sensor_offline_seconds', 60),
     temp1RiseCount: numOr('temp1_rise_count', 3),
     temp2StableDelta: numOr('temp2_stable_delta', 0.5),
     tempMax: numOr('temp_max', 35),

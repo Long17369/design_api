@@ -137,6 +137,7 @@ export const TABLE_SEEDS: TableSeed[] = [
       ['overpressure_on_release', 'auto', '1', '过压解锁后行为',    '5', '保持关闭:hold|恢复运行:resume', null, null, null, '15.7', 'control', null, null, 'string', 'hold'],
       ['pump_start_grace',       'auto', '1',  '水泵启动宽限期(s)',  '2', null,              null, '60',  '0',  '17.5', 'control', null, null, 'int',    '10'],
       ['flow_unchanged_seconds', 'auto', '1',  '累计流量不变判定(秒)', '2', null,            null, '600', '1',  '18',   'control', null, null, 'int',    '15'],
+      ['sensor_offline_seconds', 'auto', '1',  '离线判定(秒)',       '2', null,              null, '86400','0',  '19',   'control', null, null, 'int',    '60'],
       ['heat_rate_window',       'auto', '1',  '加热速度计算窗口(s)', '2', null,             null, '600', '10', '43',   'control', null, null, 'int',    '60'],
       ['avg_flow_window',        'auto', '1',  '平均水流计算窗口(s)', '2', null,             null, '600', '10', '44',   'control', null, null, 'int',    '60'],
       ['temp1_rise_count',       'auto', '1',  '温度连续上升次数',   '2', null,              null, '10',  '2',  '45',   'control', null, null, 'int',    '3'],
