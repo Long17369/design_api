@@ -9,6 +9,8 @@
     "build": "tsc",
     "lint": "eslint . --fix && tsc --noEmit",
     "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "format": "prettier --write src/"
   },
   "keywords": [],
@@ -48,6 +50,7 @@
     "prettier": "^3.9.6",
     "ts-node": "^10.9.2",
     "tsx": "^4.23.13",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.0"
   }
 }
