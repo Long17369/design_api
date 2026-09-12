@@ -118,16 +118,7 @@ export class AutoControlModule implements Closable {
 
     for (const comp of autoComponents) {
       const decision = comp.evaluate(ctx)
-      if (!decision) {
-        state.active.delete(comp.id)
-        continue
-      }
-      // 边沿触发：仅在「未触发 → 触发」时执行一次
-      if (state.active.has(comp.id)) {
-        if (decision.stop) break
-        continue
-      }
-      state.active.add(comp.id)
+      if (!decision) continue
       logger.info(`自动控制触发[${comp.name}]: ${dNo} ${decision.reason ?? ''}`)
       await this.execute(db, dm, ctx, comp.name, decision)
       if (decision.stop) break
@@ -136,6 +127,9 @@ export class AutoControlModule implements Closable {
 
   /**
    * 执行决策：堵塞保护（加锁 + 持久化标记） → 下发控制 → 写控制记录 → 发告警
+   *
+   * 注意：引擎每帧都会执行命中的决策（不做去重），幂等由组件自行保证；
+   * 执行控制后即时更新 ctx.values，供同帧后续组件判断目标当前值。
    */
   private async execute(
     db: Database,
@@ -151,6 +145,7 @@ export class AutoControlModule implements Closable {
     if (decision.controls?.length) {
       for (const c of decision.controls) {
         await setControl(dm, db, ctx.d_no, c.target, c.value, reason)
+        ctx.values.set(c.target, c.value)
       }
     }
     if (decision.alarm) {
@@ -205,7 +200,6 @@ export class AutoControlModule implements Closable {
       state = {
         pumpOn: false,
         pumpStartedAt: null,
-        active: new Set(),
         blocked: false,
         history: [],
         lastTotalFlow: null,

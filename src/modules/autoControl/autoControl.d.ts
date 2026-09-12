@@ -63,8 +63,6 @@ declare module '@modules/autoControl' {
     pumpOn: boolean
     /** 水泵本次启动时刻(ms) */
     pumpStartedAt: number | null
-    /** 当前已触发的规则 id（边沿触发用） */
-    active: Set<string>
     /** 是否处于堵塞状态（来自 direct.blocked，持久记忆，手动复位才解除） */
     blocked: boolean
     /** 最近上报帧（最新在后，供温度异常等跨帧判定） */
@@ -84,14 +82,20 @@ declare module '@modules/autoControl' {
     now: number
     /** 水泵刚启动、处于宽限期内 */
     inPumpGrace: boolean
-    /** 本帧该设备的 direct 指令值（config_id → value） */
+    /**
+     * 本帧该设备的 direct 指令值（config_id → value）。
+     * 组件据此自行判断「目标值是否已生效」，实现幂等（引擎每帧评估、不做去重）。
+     */
     values: Map<string, string>
   }
 
   /**
    * 自动控制组件（组件化核心接口）
-   * - 命中返回决策，否则返回 null
-   * - priority 越小越先执行
+   * - priority 越小越先执行；返回 null 表示不需要动作
+   * - **引擎每帧都会评估并执行命中的决策**：组件必须自行保证幂等
+   *   （如比对 ctx.values 中目标当前值，已生效则返回 null），
+   *   否则会造成重复写库 / 重复下发设备 / 重复告警
+   * - 引擎执行 controls 后会即时更新 ctx.values，供同帧后续组件判断
    */
   interface AutoComponent {
     id: string
