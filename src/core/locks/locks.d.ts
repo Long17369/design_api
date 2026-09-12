@@ -28,4 +28,22 @@ declare module '@core/locks' {
     /** 锁定前状态快照 */
     snapshot?: LockSnapshot
   }
+
+  /** 锁变化事件载荷（acquire/release 后广播，供持久化与前端推送消费） */
+  interface LockChange {
+    /** 设备编号 */
+    d_no: string
+    /** 变化类型：加锁 / 解锁 */
+    action: 'acquire' | 'release'
+    /** 变化后该设备仍有效的锁类型（空数组 = 已无锁） */
+    active: LockType[]
+    /** 本次变化涉及的锁（解锁时为释放前的锁） */
+    lock?: DeviceLock
+  }
+}
+
+declare module '@core/bus' {
+  interface EventHandlerMapper {
+    LOCK_CHANGED: import('@core/locks').LockChange
+  }
 }

@@ -1,4 +1,5 @@
-import { DeviceLock, LockSnapshot, LockTarget, LockType } from '.'
+import { bus } from '@core/bus'
+import { DeviceLock, LockChange, LockSnapshot, LockTarget, LockType } from '.'
 
 /**
  * 统一锁定通道（LockManager）。
@@ -28,6 +29,21 @@ export class LockManager {
     list.push(lock)
     this.locks.set(lock.d_no, list)
     if (lock.snapshot) this.snapshots.set(lock.d_no, lock.snapshot)
+    this.emitChange(lock.d_no, 'acquire', lock)
+  }
+
+  /**
+   * 恢复锁（启动时从持久化记录加载）：只入内存、不广播，
+   * 避免重启后被持久化层/前端拿到「新增锁」的重复事件。
+   */
+  public restore(locks: DeviceLock[]): void {
+    for (const lock of locks) {
+      if (!this.isValid(lock)) continue
+      const list = (this.locks.get(lock.d_no) ?? []).filter((item) => item.type !== lock.type)
+      list.push(lock)
+      this.locks.set(lock.d_no, list)
+      if (lock.snapshot) this.snapshots.set(lock.d_no, lock.snapshot)
+    }
   }
 
   /** 获取设备锁定前状态快照（未记录或已清除时为 undefined） */
@@ -42,14 +58,30 @@ export class LockManager {
 
   /** 解除某类锁 */
   public release(d_no: string, type: LockType): void {
-    const list = (this.locks.get(d_no) ?? []).filter((lock) => lock.type !== type)
+    const before = this.locks.get(d_no) ?? []
+    const released = before.find((lock) => lock.type === type)
+    const list = before.filter((lock) => lock.type !== type)
     if (list.length === 0) this.locks.delete(d_no)
     else this.locks.set(d_no, list)
+    if (released) this.emitChange(d_no, 'release', released)
   }
 
   /** 释放设备全部锁 */
   public releaseAll(d_no: string): void {
+    const before = this.locks.get(d_no) ?? []
     this.locks.delete(d_no)
+    if (before.length > 0) this.emitChange(d_no, 'release')
+  }
+
+  /** 锁变化广播（持久化与前端推送均从此事件派生） */
+  private emitChange(d_no: string, action: LockChange['action'], lock?: DeviceLock): void {
+    const change: LockChange = {
+      d_no,
+      action,
+      active: this.getActive(d_no).map((item) => item.type),
+      ...(lock !== undefined ? { lock } : {}),
+    }
+    bus.emitEvent('LOCK_CHANGED', change)
   }
 
   /** 某控制目标是否被锁禁止 */
