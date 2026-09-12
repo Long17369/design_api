@@ -2,16 +2,21 @@ import { bus } from '@core/bus'
 import { log } from '@core/logger'
 import { Closable } from '@core/lifecycle'
 import { Database } from '@core/database'
+import { lockManager } from '@core/locks'
+import { LockSnapshot } from '@core/locks'
 import { DirectModule } from '@modules/directModule'
 import { WsData } from '@/types/types'
 import { AutoConfig, AutoCtx, AutoDecision, DeviceState } from '@modules/autoControl'
 import { autoComponents } from './components'
-import { loadAutoConfig, sendAlarm, setControl } from './utils'
+import { loadAutoConfig, pushHistory, sendAlarm, setControl } from './utils'
 
 const logger = log.getLogger('AutoControlModule')
 
 /** 阈值配置缓存有效期(ms) */
 const CONFIG_TTL = 60_000
+
+/** 设备历史帧最大数量（温度异常等跨帧判定用） */
+const MAX_HISTORY = 10
 
 /**
  * 自动控制模块：
@@ -83,10 +88,19 @@ export class AutoControlModule implements Closable {
       return
     }
 
+    const state = this.getState(dNo)
+
+    // 堵塞记忆：一旦落定（direct.blocked='1'），数据恢复也不自动解除，须手动复位
+    if (values.get('blocked') === '1') {
+      this.restoreBlockedLock(dNo, state)
+      return
+    }
+    state.blocked = false
+
     const cfg = await this.loadConfig(db)
     const now = Date.now()
-    const state = this.getState(dNo)
     this.trackPump(state, data, now)
+    pushHistory(state.history, data, MAX_HISTORY)
 
     const ctx: AutoCtx = {
       d_no: dNo,
@@ -95,6 +109,7 @@ export class AutoControlModule implements Closable {
       state,
       now,
       inPumpGrace: this.inPumpGrace(state, cfg, now),
+      values,
     }
     if (ctx.inPumpGrace) {
       logger.debug(`水泵刚启动，宽限期内跳过判定: ${dNo}`)
@@ -119,7 +134,9 @@ export class AutoControlModule implements Closable {
     }
   }
 
-  /** 执行决策：下发控制 + 写控制记录 + 发告警 */
+  /**
+   * 执行决策：堵塞保护（加锁 + 持久化标记） → 下发控制 → 写控制记录 → 发告警
+   */
   private async execute(
     db: Database,
     dm: DirectModule,
@@ -128,6 +145,9 @@ export class AutoControlModule implements Closable {
     decision: AutoDecision,
   ): Promise<void> {
     const reason = decision.reason ?? name
+    if (decision.block) {
+      await this.blockDevice(dm, ctx, reason)
+    }
     if (decision.controls?.length) {
       for (const c of decision.controls) {
         await setControl(dm, db, ctx.d_no, c.target, c.value, reason)
@@ -138,11 +158,52 @@ export class AutoControlModule implements Closable {
     }
   }
 
+  /**
+   * 堵塞保护落定（仅首次）：
+   * 记录锁定前 heat/water 快照 → 加 blocked 锁（禁止开启水泵）→ 持久化 direct.blocked='1'。
+   * 之后数据恢复也不自动解除，须手动复位（POST /api/control/reset）。
+   */
+  private async blockDevice(dm: DirectModule, ctx: AutoCtx, reason: string): Promise<void> {
+    const { d_no: dNo, state, values } = ctx
+    if (state.blocked) return
+    state.blocked = true
+
+    const snapshot: LockSnapshot = {
+      heat: values.get('heat') === '1' ? '1' : '0',
+      water: values.get('water') === '1' ? '1' : '0',
+    }
+    lockManager.acquire({
+      type: 'blocked',
+      d_no: dNo,
+      deny: { water: true },
+      reason,
+      snapshot,
+    })
+    logger.info(`堵塞保护已锁定设备 ${dNo}（手动复位前不自动解除）`)
+    await dm.setValue({ config_id: 'blocked', value: '1', d_no: dNo })
+  }
+
+  /** 进程重启/首帧时按持久化标记恢复堵塞锁（无快照） */
+  private restoreBlockedLock(dNo: string, state: DeviceState): void {
+    if (state.blocked) return
+    state.blocked = true
+    lockManager.acquire({ type: 'blocked', d_no: dNo, deny: { water: true }, reason: 'blocked' })
+    logger.info(`设备处于堵塞状态，已恢复保护锁（等待手动复位）: ${dNo}`)
+  }
+
   /** 获取（或初始化）某设备状态 */
   private getState(dNo: string): DeviceState {
     let state = this.devices.get(dNo)
     if (!state) {
-      state = { pumpOn: false, pumpStartedAt: null, active: new Set() }
+      state = {
+        pumpOn: false,
+        pumpStartedAt: null,
+        active: new Set(),
+        blocked: false,
+        history: [],
+        lastTotalFlow: null,
+        flowUnchangedSince: null,
+      }
       this.devices.set(dNo, state)
     }
     return state

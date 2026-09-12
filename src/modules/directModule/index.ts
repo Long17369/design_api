@@ -2,12 +2,15 @@ import { bus } from '@core/bus'
 import { log } from '@core/logger'
 import { Closable } from '@core/lifecycle'
 import { Database } from '@core/database'
-import { Direct, DirectConfig } from '@/types/types'
+import { lockManager } from '@core/locks'
+import { formatNow } from '@core/utils'
+import { Direct, DirectConfig, WsAlarm } from '@/types/types'
 import { DirectConfigRow } from '.'
 import {
   CONFIG_LIST_QUERY,
   DirectModuleError,
   configByCodeQuery,
+  controlLogRow,
   deviceDataQuery,
   directKeyQuery,
   directKeyWhere,
@@ -97,6 +100,11 @@ export class DirectModule implements Closable {
     const { config_id, value, d_no } = params
     const db = this.db()
 
+    // 保护性锁定：被锁设备禁止开启水泵（关闭动作不受限，保护动作可正常执行）
+    if (config_id === 'water' && String(value) === '1' && lockManager.isDenied(d_no, 'water')) {
+      throw new DirectModuleError('设备存在保护性锁定（如堵塞），请先手动复位')
+    }
+
     const config = await this.getConfigByCode(config_id)
     if (!config) {
       throw new DirectModuleError(`未知的指令配置码: ${config_id}`)
@@ -111,5 +119,43 @@ export class DirectModule implements Closable {
       await db.insert('direct', { config_id, value: storedValue, d_no })
     }
     logger.info(`指令已更新: [${d_no}] ${config_id} = ${storedValue}`)
+  }
+
+  /**
+   * 手动复位堵塞状态：
+   * 清 direct.blocked='0' → 取回并释放该设备全部保护锁 → 按锁定前快照恢复 heat/water
+   * （写库 + control_log）→ 广播 WS reset 事件（前端清除实时预警横幅）。
+   * 故障历史（error_msg）永久保留，不删除。
+   */
+  public async resetBlock(d_no: string): Promise<void> {
+    const db = this.db()
+
+    // 1. 清除持久化堵塞标记
+    await this.setValue({ config_id: 'blocked', value: '0', d_no })
+
+    // 2. 取回锁定前快照并释放全部保护锁
+    const snapshot = lockManager.getSnapshot(d_no)
+    lockManager.releaseAll(d_no)
+
+    // 3. 按快照恢复运行状态（无快照则保持当前值，不盲目开启）
+    const reason = '手动复位：恢复运行'
+    for (const target of ['heat', 'water'] as const) {
+      if (snapshot?.[target] !== '1') continue
+      await this.setValue({ config_id: target, value: '1', d_no })
+      await db.insert('control_log', controlLogRow(d_no, target, '1', reason))
+    }
+    lockManager.clearSnapshot(d_no)
+
+    // 4. 广播复位事件（无 goal → 广播给所有客户端）
+    const cTime = formatNow()
+    const data: WsAlarm = {
+      id: `reset_${d_no}_${cTime}`,
+      d_no,
+      type: 'reset',
+      message: '堵塞已复位',
+      timestamp: cTime,
+    }
+    bus.emitEvent('WS_MESSAGE_OUT', { message: { event: 'alarm', data } })
+    logger.info(`手动复位堵塞状态: ${d_no}`)
   }
 }

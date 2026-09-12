@@ -1,0 +1,71 @@
+import { DeviceLock, LockSnapshot, LockTarget, LockType } from '.'
+
+/**
+ * 统一锁定通道（LockManager）。
+ *
+ * 集中管理设备级保护锁（堵塞 blocked / 过压 overpressure / 空转 pump_idle / 泄漏 leak）：
+ * - 自动控制命中保护规则时 `acquire` 加锁，并在锁上携带「锁定前 heat/water 快照」；
+ * - 控制下发前可用 `isDenied` 拦截被锁目标（避免绕过保护重新开车）；
+ * - 手动复位时 `releaseAll` 释放该设备全部锁，并取回快照用于恢复运行。
+ *
+ * 进程级单例，随进程存活（不参与模块 close）。
+ */
+export class LockManager {
+  /** 设备编号 → 该设备的锁列表 */
+  private readonly locks = new Map<string, DeviceLock[]>()
+
+  /** 设备编号 → 最近一次锁定前状态快照 */
+  private readonly snapshots = new Map<string, LockSnapshot>()
+
+  /** 获取设备所有有效锁 */
+  public getActive(d_no: string): DeviceLock[] {
+    return (this.locks.get(d_no) ?? []).filter((lock) => this.isValid(lock))
+  }
+
+  /** 加锁（同类型覆盖，避免重复加锁）；携带 snapshot 时更新锁定前状态快照 */
+  public acquire(lock: DeviceLock): void {
+    const list = (this.locks.get(lock.d_no) ?? []).filter((item) => item.type !== lock.type)
+    list.push(lock)
+    this.locks.set(lock.d_no, list)
+    if (lock.snapshot) this.snapshots.set(lock.d_no, lock.snapshot)
+  }
+
+  /** 获取设备锁定前状态快照（未记录或已清除时为 undefined） */
+  public getSnapshot(d_no: string): LockSnapshot | undefined {
+    return this.snapshots.get(d_no)
+  }
+
+  /** 清除设备锁定前状态快照（复位恢复完成后调用） */
+  public clearSnapshot(d_no: string): void {
+    this.snapshots.delete(d_no)
+  }
+
+  /** 解除某类锁 */
+  public release(d_no: string, type: LockType): void {
+    const list = (this.locks.get(d_no) ?? []).filter((lock) => lock.type !== type)
+    if (list.length === 0) this.locks.delete(d_no)
+    else this.locks.set(d_no, list)
+  }
+
+  /** 释放设备全部锁 */
+  public releaseAll(d_no: string): void {
+    this.locks.delete(d_no)
+  }
+
+  /** 某控制目标是否被锁禁止 */
+  public isDenied(d_no: string, target: LockTarget): boolean {
+    return this.getActive(d_no).some((lock) => lock.deny[target] === true)
+  }
+
+  /** 设备是否被任一锁锁定 */
+  public isLocked(d_no: string): boolean {
+    return this.getActive(d_no).length > 0
+  }
+
+  /** 锁是否有效（未过期） */
+  private isValid(lock: DeviceLock): boolean {
+    return lock.expiresAt === undefined || lock.expiresAt > Date.now()
+  }
+}
+
+export const lockManager = new LockManager()

@@ -1,16 +1,10 @@
 import { bus } from '@core/bus'
 import { Database } from '@core/database'
+import { formatNow } from '@core/utils'
 import { DirectModule } from '@modules/directModule'
-import { WsAlarm } from '@/types/types'
-import { AutoConfig, ControlTarget } from '@modules/autoControl'
+import { WsAlarm, WsData } from '@/types/types'
+import { AutoConfig, ControlTarget, DeviceState } from '@modules/autoControl'
 import { getAlarm } from './alarmConfig'
-
-/** 当前时间 'YYYY-MM-DD HH:mm:ss' */
-export function formatNow(): string {
-  const d = new Date()
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
-}
 
 /** 数值化；非法返回 null */
 export function toNum(value: string | number | null | undefined): number | null {
@@ -36,7 +30,39 @@ export async function loadAutoConfig(db: Database): Promise<AutoConfig> {
     overpressureLimit: numOr('overpressure_limit', 20),
     flowRateZero: numOr('flow_rate_zero', 0.01),
     pumpStartGrace: numOr('pump_start_grace', 10),
+    flowUnchangedSeconds: numOr('flow_unchanged_seconds', 15),
+    temp1RiseCount: numOr('temp1_rise_count', 3),
+    temp2StableDelta: numOr('temp2_stable_delta', 0.5),
   }
+}
+
+/** 追加一帧上报到设备历史（超出上限丢弃最旧帧） */
+export function pushHistory(history: WsData[], frame: WsData, max: number): void {
+  history.push(frame)
+  if (history.length > max) history.splice(0, history.length - max)
+}
+
+/**
+ * 温度异常判定：最近 (temp1RiseCount + 1) 帧内
+ * 「升温1 严格递增」且「升温2 极差 ≤ temp2StableDelta」。
+ * 任一温度缺测即返回 false（数据不足不判定）。
+ */
+export function isTempAnomaly(state: DeviceState, cfg: AutoConfig): boolean {
+  const need = cfg.temp1RiseCount + 1
+  if (state.history.length < need) return false
+  const recent = state.history.slice(-need)
+
+  for (let i = 1; i < recent.length; i++) {
+    const prev = toNum(recent[i - 1]?.wen_du1)
+    const cur = toNum(recent[i]?.wen_du1)
+    if (prev === null || cur === null || cur <= prev) return false
+  }
+
+  const outs = recent
+    .map((row) => toNum(row.wen_du2))
+    .filter((value): value is number => value !== null)
+  if (outs.length < recent.length) return false
+  return Math.max(...outs) - Math.min(...outs) <= cfg.temp2StableDelta
 }
 
 /** 下发控制（经 DirectModule）并写控制记录 control_log */

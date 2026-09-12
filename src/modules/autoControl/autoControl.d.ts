@@ -32,6 +32,11 @@ declare module '@modules/autoControl' {
     alarmCode?: string
     /** 命中后是否终止后续组件 */
     stop?: boolean
+    /**
+     * 是否判定为「堵塞」：命中即持久化 direct.blocked='1' 并加 blocked 锁
+     * （锁上记录锁定前 heat/water 快照，供手动复位恢复）；数据恢复不自动解除。
+     */
+    block?: boolean
   }
 
   /** 自动控制阈值配置（来自 direct_config.default_value） */
@@ -44,6 +49,12 @@ declare module '@modules/autoControl' {
     flowRateZero: number
     /** 水泵启动宽限期(秒)：仅水泵刚启动时生效 */
     pumpStartGrace: number
+    /** 累计流量不变持续秒数（超过视为堵塞） */
+    flowUnchangedSeconds: number
+    /** 温度异常判定：升温1 连续上升次数 */
+    temp1RiseCount: number
+    /** 温度异常判定：升温2 允许波动(°C) */
+    temp2StableDelta: number
   }
 
   /** 单设备运行状态 */
@@ -54,6 +65,14 @@ declare module '@modules/autoControl' {
     pumpStartedAt: number | null
     /** 当前已触发的规则 id（边沿触发用） */
     active: Set<string>
+    /** 是否处于堵塞状态（来自 direct.blocked，持久记忆，手动复位才解除） */
+    blocked: boolean
+    /** 最近上报帧（最新在后，供温度异常等跨帧判定） */
+    history: WsData[]
+    /** 上一帧累计流量（累计流量不变判定用） */
+    lastTotalFlow: number | null
+    /** 累计流量开始不变的时刻(ms)，恢复变化时置 null */
+    flowUnchangedSince: number | null
   }
 
   /** 组件评估上下文 */
@@ -65,6 +84,8 @@ declare module '@modules/autoControl' {
     now: number
     /** 水泵刚启动、处于宽限期内 */
     inPumpGrace: boolean
+    /** 本帧该设备的 direct 指令值（config_id → value） */
+    values: Map<string, string>
   }
 
   /**

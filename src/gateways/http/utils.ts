@@ -227,6 +227,23 @@ export async function handleDirectDeviceData(
 }
 
 /**
+ * 处理 POST /control/reset —— 手动复位设备堵塞状态
+ */
+export async function handleControlReset(
+  dm: DirectModule,
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const body = (req.body ?? {}) as Record<string, unknown>
+  const { d_no } = body
+  if (typeof d_no !== 'string' || d_no === '') {
+    throw new HttpError(400, 'INVALID_PARAMS', '缺少 d_no 参数')
+  }
+  await dm.resetBlock(d_no)
+  res.status(200).json(successResponse({ message: '堵塞已复位' }))
+}
+
+/**
  * 处理 POST /direct/update —— 修改某设备某条指令值
  */
 export async function handleDirectUpdate(

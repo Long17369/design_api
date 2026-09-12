@@ -1,3 +1,4 @@
+import { formatNow } from '@core/utils'
 import { DirectConfigRow } from '.'
 import { DataQueryParams, DirectConfig, Where } from '@/types/types'
 
@@ -12,8 +13,9 @@ export class DirectModuleError extends Error {
   }
 }
 
-/** 数据库行 → 前端 DirectConfig 契约（code/ref_code 映射为 id/ref_id） */
-export function toConfig(row: DirectConfigRow): DirectConfig {
+/** 数据库行 → 前端 DirectConfig 契约（code/ref_code 映射为 id/ref_id） */ export function toConfig(
+  row: DirectConfigRow,
+): DirectConfig {
   return {
     id: row.code,
     ref_id: row.ref_code,
@@ -125,5 +127,26 @@ export function directKeyQuery(config_id: string, d_no: string): DataQueryParams
     ...QUERY_BASE,
     limit: '1',
     where: directKeyWhere(config_id, d_no),
+  }
+}
+
+/**
+ * 控制记录行（control_log field1..5），供手动控制/复位落库。
+ * field1=来源(manual/auto/config) field2=控制对象 field3=动作 field4=值 field5=理由
+ */
+export function controlLogRow(
+  d_no: string,
+  target: 'heat' | 'water',
+  value: '0' | '1',
+  reason: string,
+): Record<string, string> {
+  return {
+    d_no,
+    c_time: formatNow(),
+    field1: 'manual',
+    field2: target,
+    field3: value === '1' ? 'on' : 'off',
+    field4: value,
+    field5: reason,
   }
 }
