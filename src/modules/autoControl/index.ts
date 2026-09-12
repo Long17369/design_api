@@ -7,7 +7,7 @@ import { lockManager } from '@core/locks'
 import { LockSnapshot } from '@core/locks'
 import { DirectModule } from '@modules/directModule'
 import { WsData } from '@/types/types'
-import { AutoConfig, AutoCtx, AutoDecision, DeviceState } from '@modules/autoControl'
+import { AutoConfig, AutoCtx, AutoDecision, ControlAction, DeviceState } from '@modules/autoControl'
 import { autoComponents } from './components'
 import { buildAutoConfig, loadConfigDefaults, pushHistory, sendAlarm, setControl } from './utils'
 
@@ -111,22 +111,26 @@ export class AutoControlModule implements Closable {
       inPumpGrace: this.inPumpGrace(state, cfg, now),
       values,
     }
+
     if (ctx.inPumpGrace) {
       logger.debug(`水泵刚启动，宽限期内跳过判定: ${dNo}`)
-      return
+    } else {
+      for (const comp of autoComponents) {
+        const decision = comp.evaluate(ctx)
+        if (!decision) continue
+        logger.info(`自动控制触发[${comp.name}]: ${dNo} ${decision.reason ?? ''}`)
+        await this.execute(db, dm, ctx, comp.name, decision)
+        if (decision.stop) break
+      }
     }
 
-    for (const comp of autoComponents) {
-      const decision = comp.evaluate(ctx)
-      if (!decision) continue
-      logger.info(`自动控制触发[${comp.name}]: ${dNo} ${decision.reason ?? ''}`)
-      await this.execute(db, dm, ctx, comp.name, decision)
-      if (decision.stop) break
-    }
+    // 安全兜底（不受宽限期影响）：水泵已停（指令值或上报值）而加热仍开 → 立即关加热。
+    // 放在决策之后：既覆盖绕过决策的停泵场景，又避免与决策中已有的「关加热」重复写库/下发。
+    await this.guardHeatWithPump(db, dm, ctx)
   }
 
   /**
-   * 执行决策：堵塞保护（加锁 + 持久化标记） → 下发控制 → 写控制记录 → 发告警
+   * 执行决策：堵塞保护（加锁） → 下发控制 → 写控制记录 → 发告警
    *
    * 注意：引擎每帧都会执行命中的决策（不做去重），幂等由组件自行保证；
    * 执行控制后即时更新 ctx.values，供同帧后续组件判断目标当前值。
@@ -143,14 +147,54 @@ export class AutoControlModule implements Closable {
       await this.blockDevice(ctx, reason)
     }
     if (decision.controls?.length) {
-      for (const c of decision.controls) {
-        await setControl(dm, db, ctx.d_no, c.target, c.value, reason)
+      for (const c of this.withHeatOffBeforePumpOff(ctx, decision.controls)) {
+        const controlReason = c.relay ? `${reason}（关泵联动关加热）` : reason
+        await setControl(dm, db, ctx.d_no, c.target, c.value, controlReason)
         ctx.values.set(c.target, c.value)
       }
     }
     if (decision.alarm) {
       await sendAlarm(db, ctx.d_no, decision.alarm, reason)
     }
+  }
+
+  /**
+   * 统一安全规则①：控制序列里出现「关水泵」且此时加热仍开时，自动在**前面**补一条「关加热」。
+   * 避免水泵停机后加热器继续工作（干烧）。
+   *
+   * 注意：按序跟踪（`heatClosing`）——若决策自身已经先关了加热（如堵塞保护 [heat, water]），
+   * 则不再补重复的控制，保证一次决策对同一目标只下一次指令。
+   */
+  private withHeatOffBeforePumpOff(
+    ctx: AutoCtx,
+    controls: ControlAction[],
+  ): Array<ControlAction & { relay?: boolean }> {
+    const out: Array<ControlAction & { relay?: boolean }> = []
+    let heatClosing = ctx.values.get('heat') !== '1'
+    for (const control of controls) {
+      if (control.target === 'heat' && control.value === '0') heatClosing = true
+      if (control.target === 'water' && control.value === '0' && !heatClosing) {
+        out.push({ target: 'heat', value: '0', relay: true })
+        heatClosing = true
+      }
+      out.push(control)
+    }
+    return out
+  }
+
+  /**
+   * 统一安全规则②（状态兜底）：
+   * 水泵已停（**指令值或上报泵状态任一为泵停**）而加热仍开 → 立即关加热。
+   * 覆盖手动关泵、设备自行停泵等“绕过控制决策”的情况；不受水泵启动宽限期影响。
+   */
+  private async guardHeatWithPump(db: Database, dm: DirectModule, ctx: AutoCtx): Promise<void> {
+    if (ctx.values.get('heat') !== '1') return
+    const pumpStopped = ctx.values.get('water') === '0' || ctx.data.shui_beng !== '1'
+    if (!pumpStopped) return
+
+    logger.info(`水泵已停止，自动关闭加热: ${ctx.d_no}`)
+    await setControl(dm, db, ctx.d_no, 'heat', '0', '安全规则：水泵停止，关闭加热')
+    ctx.values.set('heat', '0')
   }
 
   /**
