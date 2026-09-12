@@ -55,6 +55,14 @@ declare module '@modules/autoControl' {
     temp1RiseCount: number
     /** 温度异常判定：升温2 允许波动(°C) */
     temp2StableDelta: number
+    /** 恒温上限(°C)：检测值达到即关加热 */
+    tempMax: number
+    /** 恒温下限(°C)：检测值低于即开加热（水泵运行中才执行） */
+    tempMin: number
+    /** 恒温上限检测传感器：1=升温1(temp_in) 2=升温2(temp_out) */
+    tempMaxSensor: number
+    /** 恒温下限检测传感器：1=升温1(temp_in) 2=升温2(temp_out) */
+    tempMinSensor: number
   }
 
   /** 单设备运行状态 */

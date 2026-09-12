@@ -35,7 +35,16 @@ export async function loadAutoConfig(db: Database): Promise<AutoConfig> {
     flowUnchangedSeconds: numOr('flow_unchanged_seconds', 15),
     temp1RiseCount: numOr('temp1_rise_count', 3),
     temp2StableDelta: numOr('temp2_stable_delta', 0.5),
+    tempMax: numOr('temp_max', 35),
+    tempMin: numOr('temp_min', 10),
+    tempMaxSensor: numOr('temp_max_sensor', 2),
+    tempMinSensor: numOr('temp_min_sensor', 2),
   }
+}
+
+/** 按传感器标识取温度：1=升温1(wen_du1)、2=升温2(wen_du2)；无效返回 null */
+export function sensorTemp(sensor: number, data: WsData): number | null {
+  return toNum(sensor === 1 ? data.wen_du1 : data.wen_du2)
 }
 
 /** 追加一帧上报到设备历史（超出上限丢弃最旧帧） */
