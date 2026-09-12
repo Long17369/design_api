@@ -1,5 +1,12 @@
-import { AutoComponent, AutoCtx, AutoDecision } from '@modules/autoControl'
+import { AlarmDef, AutoComponent, AutoCtx, AutoDecision } from '@modules/autoControl'
 import { toNum } from '../utils'
+
+/** 本组件告警定义（文案/等级随组件走，不再集中翻译） */
+const ALARM: AlarmDef = {
+  code: 'pressure_zero',
+  level: 'error',
+  message: '水管堵塞：压力归零',
+}
 
 /**
  * 堵塞判定①：压力归零 —— pressure < pressure_zero。
@@ -15,7 +22,7 @@ export const pressureZeroComponent: AutoComponent = {
     if (pressure === null || pressure >= ctx.cfg.pressureZero) return null
     return {
       reason: `水管堵塞：压力归零(${pressure} < ${ctx.cfg.pressureZero})`,
-      alarmCode: 'pressure_zero',
+      alarm: ALARM,
       controls: [
         { target: 'heat', value: '0' },
         { target: 'water', value: '0' },

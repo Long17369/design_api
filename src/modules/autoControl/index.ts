@@ -153,8 +153,8 @@ export class AutoControlModule implements Closable {
         await setControl(dm, db, ctx.d_no, c.target, c.value, reason)
       }
     }
-    if (decision.alarmCode) {
-      await sendAlarm(db, ctx.d_no, decision.alarmCode, reason)
+    if (decision.alarm) {
+      await sendAlarm(db, ctx.d_no, decision.alarm, reason)
     }
   }
 

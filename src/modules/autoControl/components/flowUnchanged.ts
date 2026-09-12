@@ -1,5 +1,12 @@
-import { AutoComponent, AutoCtx, AutoDecision } from '@modules/autoControl'
+import { AlarmDef, AutoComponent, AutoCtx, AutoDecision } from '@modules/autoControl'
 import { toNum } from '../utils'
+
+/** 本组件告警定义（文案/等级随组件走，不再集中翻译） */
+const ALARM: AlarmDef = {
+  code: 'flow_unchanged',
+  level: 'error',
+  message: '水管堵塞：累计流量无变化',
+}
 
 /**
  * 堵塞判定③：累计流量不变 —— 累计流量连续 flow_unchanged_seconds 秒无变化
@@ -39,7 +46,7 @@ export const flowUnchangedComponent: AutoComponent = {
 
     return {
       reason: `水管堵塞：累计流量无变化(${total} 持续 ${cfg.flowUnchangedSeconds}s)`,
-      alarmCode: 'flow_unchanged',
+      alarm: ALARM,
       controls: [
         { target: 'heat', value: '0' },
         { target: 'water', value: '0' },

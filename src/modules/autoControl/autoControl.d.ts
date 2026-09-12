@@ -14,7 +14,7 @@ declare module '@modules/autoControl' {
     value: '0' | '1'
   }
 
-  /** 告警定义（code → 文案/等级/颜色） */
+  /** 告警定义（由组件自行定义并随决策返回，不再集中翻译） */
   interface AlarmDef {
     code: string
     level: 'error' | 'warning'
@@ -28,8 +28,8 @@ declare module '@modules/autoControl' {
     controls?: ControlAction[]
     /** 控制/告警理由（落 control_log.field5 / error_msg） */
     reason?: string
-    /** 告警事件码（对应 alarmConfig） */
-    alarmCode?: string
+    /** 告警定义（组件自带文案/等级；空则不告警） */
+    alarm?: AlarmDef
     /** 命中后是否终止后续组件 */
     stop?: boolean
     /**

@@ -1,5 +1,12 @@
-import { AutoComponent, AutoCtx, AutoDecision } from '@modules/autoControl'
+import { AlarmDef, AutoComponent, AutoCtx, AutoDecision } from '@modules/autoControl'
 import { isTempAnomaly } from '../utils'
+
+/** 本组件告警定义（文案/等级随组件走，不再集中翻译） */
+const ALARM: AlarmDef = {
+  code: 'temp_anomaly',
+  level: 'error',
+  message: '水管堵塞：温度异常',
+}
 
 /**
  * 堵塞判定④：温度异常 —— 升温1 连续上升 temp1_rise_count 次，
@@ -15,7 +22,7 @@ export const tempAnomalyComponent: AutoComponent = {
     if (!isTempAnomaly(ctx.state, ctx.cfg)) return null
     return {
       reason: `水管堵塞：温度异常(升温1 连续上升 ${ctx.cfg.temp1RiseCount} 次且升温2 波动 ≤ ${ctx.cfg.temp2StableDelta})`,
-      alarmCode: 'temp_anomaly',
+      alarm: ALARM,
       controls: [
         { target: 'heat', value: '0' },
         { target: 'water', value: '0' },

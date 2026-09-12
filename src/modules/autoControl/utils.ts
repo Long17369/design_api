@@ -1,10 +1,12 @@
 import { bus } from '@core/bus'
+import { log } from '@core/logger'
 import { Database } from '@core/database'
 import { formatNow } from '@core/utils'
 import { DirectModule } from '@modules/directModule'
 import { WsAlarm, WsData } from '@/types/types'
-import { AutoConfig, ControlTarget, DeviceState } from '@modules/autoControl'
-import { getAlarm } from './alarmConfig'
+import { AlarmDef, AutoConfig, ControlTarget, DeviceState } from '@modules/autoControl'
+
+const logger = log.getLogger('AutoControlUtils')
 
 /** 数值化；非法返回 null */
 export function toNum(value: string | number | null | undefined): number | null {
@@ -86,32 +88,34 @@ export async function setControl(
   })
 }
 
-/** 写告警（error_msg）并 WS 推送 */
+/**
+ * 写告警（error_msg）并 WS 推送。
+ * 文案/等级/颜色由命中组件的 AlarmDef 直接给出（不做集中翻译），reason 仅落 control_log。
+ */
 export async function sendAlarm(
   db: Database,
   dNo: string,
-  code: string,
+  alarm: AlarmDef,
   reason: string,
 ): Promise<void> {
-  const def = getAlarm(code)
-  const message = def?.message ?? reason
   const cTime = formatNow()
   await db.insert('error_msg', {
     d_no: dNo,
     c_time: cTime,
-    field1: message,
-    field2: code,
+    field1: alarm.message,
+    field2: alarm.code,
     field3: 'block',
   })
-  const alarm: WsAlarm = {
+  const data: WsAlarm = {
     id: `alarm_${dNo}_${cTime}`,
     d_no: dNo,
     type: 'alarm',
-    message,
-    code,
-    level: def?.level ?? 'error',
+    message: alarm.message,
+    code: alarm.code,
+    level: alarm.level,
     timestamp: cTime,
-    ...(def?.color ? { color: def.color } : {}),
+    ...(alarm.color ? { color: alarm.color } : {}),
   }
-  bus.emitEvent('WS_MESSAGE_OUT', { message: { event: 'alarm', data: alarm } })
+  bus.emitEvent('WS_MESSAGE_OUT', { message: { event: 'alarm', data } })
+  logger.debug(`告警已推送: ${dNo} ${alarm.code} (${reason})`)
 }

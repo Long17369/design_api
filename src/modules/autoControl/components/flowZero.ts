@@ -1,5 +1,12 @@
-import { AutoComponent, AutoCtx, AutoDecision } from '@modules/autoControl'
+import { AlarmDef, AutoComponent, AutoCtx, AutoDecision } from '@modules/autoControl'
 import { toNum } from '../utils'
+
+/** 本组件告警定义（文案/等级随组件走，不再集中翻译） */
+const ALARM: AlarmDef = {
+  code: 'flow_zero',
+  level: 'error',
+  message: '水管堵塞：瞬时流量归零',
+}
 
 /**
  * 堵塞判定②：瞬时流量归零 —— 瞬时流量 < flow_rate_zero。
@@ -15,7 +22,7 @@ export const flowZeroComponent: AutoComponent = {
     if (flow === null || flow >= ctx.cfg.flowRateZero) return null
     return {
       reason: `水管堵塞：瞬时流量归零(${flow} < ${ctx.cfg.flowRateZero})`,
-      alarmCode: 'flow_zero',
+      alarm: ALARM,
       controls: [
         { target: 'heat', value: '0' },
         { target: 'water', value: '0' },

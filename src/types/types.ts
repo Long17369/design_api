@@ -206,7 +206,7 @@ export interface WsAlarm {
   type: 'alarm' | 'error' | 'reset'
   message: string
   timestamp: string
-  /** 告警事件码（如 pressure_zero / spike / leak，对应 alarmConfig） */
+  /** 告警事件码（如 pressure_zero / overpressure；由命中组件自行定义） */
   code?: string
   /** 等级：error=红 / warning=黄 */
   level?: 'error' | 'warning'
