@@ -26,6 +26,8 @@ declare module '@modules/sensorModule' {
     lastRaw: DataPayload | null
     /** 连续跳变帧数（防抖：达到阈值帧数才标记无效） */
     spikeCount: number
+    /** 是否已尝试从数据库恢复累计流量（进程启动后首次上报） */
+    restored: boolean
   }
 
   /** 派生计算配置（来自 direct_config.default_value） */

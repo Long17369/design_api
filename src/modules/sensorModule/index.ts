@@ -93,6 +93,11 @@ export class SensorModule implements Closable {
 
     // 1. 更新滑动窗口（窗口取两者较大值，避免过早裁剪）
     const state = this.getState(raw.id)
+    // 累计流量持久化：进程启动后首次上报时，从最后一条落库帧续算（重启不归零）
+    if (!state.restored) {
+      state.restored = true
+      await this.restoreTotalFlow(db, raw.id, mapper, state)
+    }
     const windowSec = Math.max(config.heatRateWindow, config.avgFlowWindow)
     pushSample(state.tempSamples, now, toNum(raw.temp_out), windowSec)
     pushSample(state.flowSamples, now, flowRate, windowSec)
@@ -139,10 +144,39 @@ export class SensorModule implements Closable {
         flowSamples: [],
         lastRaw: null,
         spikeCount: 0,
+        restored: false,
       }
       this.devices.set(dNo, state)
     }
     return state
+  }
+
+  /**
+   * 从最后一条落库帧恢复累计流量（重启续算，不再归零）。
+   * 累计流量所在数据库列由 mapper 中 `api_name === 'liu_liang1'` 的 `db_name` 决定；
+   * 无映射或无历史数据时保持 0（首次运行）。
+   */
+  private async restoreTotalFlow(
+    db: Database,
+    dNo: string,
+    mapper: FieldMapper[],
+    state: DeviceState,
+  ): Promise<void> {
+    const column = mapper.find((m) => m.api_name === 'liu_liang1')?.db_name
+    if (!column) return
+    const rows = await db.executeQuery<Record<string, string | number | null>>({
+      table: 'sensor_data',
+      columns: [column],
+      where: { d_no: { operator: '=', value: dNo } },
+      orderBy: 'id',
+      order: 'DESC',
+      limit: '1',
+      offset: '0',
+    })
+    const restored = toNum(rows[0]?.[column] ?? null)
+    if (restored === null || restored <= 0) return
+    state.totalFlow = restored
+    logger.info(`累计流量已恢复: ${dNo} = ${restored}L`)
   }
 
   /** 读取派生计算配置（direct_config.default_value，缓存 tag=direct_config） */
