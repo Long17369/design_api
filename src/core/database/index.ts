@@ -414,9 +414,17 @@ export class Database implements Closable {
       return
     }
 
-    if (!isColumnAllowed(info, seed.keyColumn)) {
-      logger.error(`同步键列 ${seed.keyColumn} 不存在于表 ${info.name}`)
-      throw new Error(`同步键列 ${seed.keyColumn} 不存在于表 ${info.name}`)
+    // 列定义校验：必须含同步键列，且所有声明列都在表白名单内
+    const keyIndex = seed.columns.indexOf(seed.keyColumn)
+    if (keyIndex < 0) {
+      logger.error(`表 ${info.name} 的初始化项列定义缺少同步键列 ${seed.keyColumn}`)
+      throw new Error(`表 ${info.name} 的初始化项列定义缺少同步键列 ${seed.keyColumn}`)
+    }
+    for (const column of seed.columns) {
+      if (!isColumnAllowed(info, column)) {
+        logger.error(`列 ${column} 不存在于表 ${info.name}，无法同步初始化项`)
+        throw new Error(`列 ${column} 不存在于表 ${info.name}，无法同步初始化项`)
+      }
     }
     if (seed.rows.length === 0) {
       return
@@ -425,7 +433,7 @@ export class Database implements Closable {
     // 查询表中已存在的键，避免重复插入
     const keyValues: SqlValue[] = []
     for (const row of seed.rows) {
-      const key = row[seed.keyColumn]
+      const key = row[keyIndex]
       if (key !== undefined && key !== null) keyValues.push(key)
     }
     if (keyValues.length === 0) {
@@ -440,27 +448,19 @@ export class Database implements Closable {
     )) as [Array<{ key: string | number }>, unknown]
     const existing = new Set(existingRows.map((row) => String(row.key)))
 
+    const insertSQL = `INSERT INTO ${info.name} (${seed.columns
+      .map((column) => quote(column))
+      .join(', ')}) VALUES (${seed.columns.map(() => '?').join(', ')})`
+
     let insertedCount = 0
     for (const row of seed.rows) {
-      const key = row[seed.keyColumn]
+      const key = row[keyIndex]
       if (key === undefined || key === null || existing.has(String(key))) continue
 
-      const columns: string[] = []
-      const values: SqlValue[] = []
-      for (const [column, value] of Object.entries(row)) {
-        if (column === undefined || value === undefined) continue
-        if (!isColumnAllowed(info, column)) {
-          logger.error(`列 ${column} 不存在于表 ${info.name}，无法同步初始化项`)
-          throw new Error(`列 ${column} 不存在于表 ${info.name}，无法同步初始化项`)
-        }
-        columns.push(column)
-        values.push(value)
-      }
-      if (columns.length === 0) continue
-
-      const quotedColumns = columns.map((column) => quote(column)).join(', ')
-      const sql = `INSERT INTO ${info.name} (${quotedColumns}) VALUES (${columns.map(() => '?').join(', ')})`
-      await connection.query(sql, values)
+      await connection.query(
+        insertSQL,
+        seed.columns.map((_, index) => row[index] ?? null),
+      )
       insertedCount++
     }
     logger.info(`表 ${info.name} 初始化项同步完成：新增 ${insertedCount} / ${seed.rows.length} 行`)

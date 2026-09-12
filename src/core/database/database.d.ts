@@ -26,7 +26,10 @@ declare module '@core/database/seeds' {
   interface TableSeed {
     table: string
     keyColumn: string
-    rows: Array<Record<string, SqlValue>>
+    /** 列定义（行的值按此顺序给出） */
+    columns: string[]
+    /** 值行数组（顺序与 columns 一致，null 表示写入 NULL） */
+    rows: SqlValue[][]
   }
 }
 
