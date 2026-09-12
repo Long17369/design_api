@@ -1,4 +1,5 @@
 import { bus } from '@core/bus'
+import { cache } from '@core/cache'
 import { log } from '@core/logger'
 import { Closable } from '@core/lifecycle'
 import { Database } from '@core/database'
@@ -19,8 +20,11 @@ import {
 
 const logger = log.getLogger('SensorModule')
 
-/** 配置 / 映射表缓存有效期(ms) */
-const CACHE_TTL = 60_000
+/** 派生计算配置缓存 key（tag = direct_config） */
+const CONFIG_CACHE_KEY = 'sensorModule:config'
+
+/** 字段映射表缓存 key（tag = sensor_data_mapper） */
+const MAPPER_CACHE_KEY = 'sensorModule:mapper'
 
 /**
  * 传感器数据模块：
@@ -32,8 +36,6 @@ export class SensorModule implements Closable {
 
   /** 各设备处理状态（滑动窗口 / 累计流量） */
   private readonly devices = new Map<string, DeviceState>()
-  private configCache: { at: number; value: SensorConfig } | null = null
-  private mapperCache: { at: number; value: FieldMapper[] } | null = null
 
   /** 串行处理链，保证上报按时序处理（窗口/累计状态依赖顺序） */
   private queue: Promise<void> = Promise.resolve()
@@ -58,12 +60,10 @@ export class SensorModule implements Closable {
     this.database = database
   }
 
-  /** 释放资源：统一注销所有事件订阅并清空缓存 */
+  /** 释放资源：统一注销所有事件订阅并清空设备状态 */
   public close(): void {
     this.unsubscribers.splice(0).forEach((unsubscribe) => unsubscribe())
     this.devices.clear()
-    this.configCache = null
-    this.mapperCache = null
     this.queue = Promise.resolve()
   }
 
@@ -129,41 +129,42 @@ export class SensorModule implements Closable {
     return state
   }
 
-  /** 读取派生计算配置（来自 direct_config.default_value），带 TTL 缓存 */
-  private async loadConfig(db: Database): Promise<SensorConfig> {
-    const now = Date.now()
-    if (this.configCache && now - this.configCache.at < CACHE_TTL) return this.configCache.value
-
-    const rows = await db.executeQuery<{ code: string; default_value: string | null }>({
-      table: 'direct_config',
-      columns: ['code', 'default_value'],
-      orderBy: 'id',
-      order: 'ASC',
-      limit: '100',
-      offset: '0',
-    })
-    const byCode = new Map(rows.map((row) => [row.code, row.default_value]))
-    const value: SensorConfig = {
-      heatRateWindow: intOr(byCode.get('heat_rate_window'), 60),
-      avgFlowWindow: intOr(byCode.get('avg_flow_window'), 60),
-    }
-    this.configCache = { at: now, value }
-    return value
+  /** 读取派生计算配置（direct_config.default_value，缓存 tag=direct_config） */
+  private loadConfig(db: Database): Promise<SensorConfig> {
+    return cache.remember(
+      CONFIG_CACHE_KEY,
+      async () => {
+        const rows = await db.executeQuery<{ code: string; default_value: string | null }>({
+          table: 'direct_config',
+          columns: ['code', 'default_value'],
+          orderBy: 'id',
+          order: 'ASC',
+          limit: '100',
+          offset: '0',
+        })
+        const byCode = new Map(rows.map((row) => [row.code, row.default_value]))
+        return {
+          heatRateWindow: intOr(byCode.get('heat_rate_window'), 60),
+          avgFlowWindow: intOr(byCode.get('avg_flow_window'), 60),
+        }
+      },
+      { tag: 'direct_config' },
+    )
   }
 
-  /** 读取 sensor_data 字段映射表（api_name→db_name），带 TTL 缓存 */
-  private async loadMapper(db: Database): Promise<FieldMapper[]> {
-    const now = Date.now()
-    if (this.mapperCache && now - this.mapperCache.at < CACHE_TTL) return this.mapperCache.value
-
-    const rows = await db.executeQuery<FieldMapper>({
-      table: 'sensor_data_mapper',
-      orderBy: 'id',
-      order: 'ASC',
-      limit: '100',
-      offset: '0',
-    })
-    this.mapperCache = { at: now, value: rows }
-    return rows
+  /** 读取 sensor_data 字段映射表（api_name→db_name，缓存 tag=sensor_data_mapper） */
+  private loadMapper(db: Database): Promise<FieldMapper[]> {
+    return cache.remember(
+      MAPPER_CACHE_KEY,
+      () =>
+        db.executeQuery<FieldMapper>({
+          table: 'sensor_data_mapper',
+          orderBy: 'id',
+          order: 'ASC',
+          limit: '100',
+          offset: '0',
+        }),
+      { tag: 'sensor_data_mapper' },
+    )
   }
 }
