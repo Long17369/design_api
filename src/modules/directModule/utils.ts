@@ -130,6 +130,17 @@ export function directKeyQuery(config_id: string, d_no: string): DataQueryParams
   }
 }
 
+/** direct 表按「配置码 + 设备」取其值（不存在行时返回空数组） */
+export function directValueQuery(config_id: string, d_no: string): DataQueryParams {
+  return {
+    table: 'direct',
+    columns: ['value'],
+    ...QUERY_BASE,
+    limit: '1',
+    where: directKeyWhere(config_id, d_no),
+  }
+}
+
 /**
  * 控制记录行（control_log field1..5），供手动控制/复位落库。
  * field1=来源(manual/auto/config) field2=控制对象 field3=动作 field4=值 field5=理由

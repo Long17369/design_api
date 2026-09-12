@@ -227,6 +227,26 @@ export async function handleDirectDeviceData(
 }
 
 /**
+ * 处理 POST /control —— 手动控制（走 DirectModule，手动通道专用校验）
+ */
+export async function handleControl(dm: DirectModule, req: Request, res: Response): Promise<void> {
+  const body = (req.body ?? {}) as Record<string, unknown>
+  const { target, action, d_no } = body
+  if (target !== 'heat' && target !== 'water') {
+    throw new HttpError(400, 'INVALID_PARAMS', 'target 必须为 heat 或 water')
+  }
+  if (action !== 'on' && action !== 'off') {
+    throw new HttpError(400, 'INVALID_PARAMS', 'action 必须为 on 或 off')
+  }
+  if (typeof d_no !== 'string' || d_no === '') {
+    throw new HttpError(400, 'INVALID_PARAMS', '缺少 d_no 参数')
+  }
+
+  await dm.control({ target, action, d_no })
+  res.status(200).json(successResponse({ message: '指令已下发' }))
+}
+
+/**
  * 处理 POST /control/reset —— 手动复位设备堵塞状态
  */
 export async function handleControlReset(

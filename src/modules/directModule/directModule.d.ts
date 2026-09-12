@@ -20,6 +20,12 @@ declare module '@modules/directModule' {
     on: ModbusCommand
     off: ModbusCommand
   }
+  /** 手动控制参数（HTTP POST /api/control） */
+  interface ControlParams {
+    target: 'heat' | 'water'
+    action: 'on' | 'off'
+    d_no: string
+  }
   /** 指令值写入参数（source 用于 direct 通知，标识变更来源） */
   interface SetValueParams {
     config_id: string

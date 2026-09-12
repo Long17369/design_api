@@ -10,6 +10,7 @@ import {
   HttpError,
   errorResponse,
   handleCount,
+  handleControl,
   handleControlReset,
   handleData,
   handleDataDevices,
@@ -160,7 +161,11 @@ export class HttpServer implements Closable {
       wrap((req, res) => handleDirectUpdate(this.direct(), req, res)),
     )
 
-    // 控制接口：手动复位堵塞状态（清标记 + 释放保护锁 + 广播 reset 事件）
+    // 控制接口：手动控制（自动控制关闭时才允许）+ 手动复位堵塞状态
+    this.app.post(
+      `${API_BASE}/control`,
+      wrap((req, res) => handleControl(this.direct(), req, res)),
+    )
     this.app.post(
       `${API_BASE}/control/reset`,
       wrap((req, res) => handleControlReset(this.direct(), req, res)),

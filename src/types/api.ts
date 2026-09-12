@@ -136,6 +136,25 @@ export const updateDirectData = (data: UpdateDirectParams) => {
 }
 
 /**
+ * 手动控制设备（加热/水泵的开关）
+ * 后端拒绝场景：自动控制已开启（400）、设备存在保护性锁定时开启水泵（400）
+ * @param target 控制对象：heat（加热）/ water（水泵）
+ * @param action 动作：on | off
+ * @param d_no 设备编号
+ */
+export const sendControlCommand = (
+  target: 'heat' | 'water',
+  action: 'on' | 'off',
+  d_no: string,
+) => {
+  return fetchApi<{ message: string }>(`${BASE_URL}/control`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target, action, d_no }),
+  })
+}
+
+/**
  * 手动复位设备堵塞状态（清除持久化 blocked 标记 + 释放保护锁 + 广播 reset 事件）
  * @param d_no 设备编号
  */

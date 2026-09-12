@@ -5,7 +5,7 @@ import { Database } from '@core/database'
 import { lockManager } from '@core/locks'
 import { formatNow } from '@core/utils'
 import { Direct, DirectConfig, WsAlarm, WsDirectUpdate } from '@/types/types'
-import { DirectConfigRow, SetValueParams } from '.'
+import { ControlParams, DirectConfigRow, SetValueParams } from '.'
 import { buildControlMessage } from './dispatch'
 import {
   CONFIG_LIST_QUERY,
@@ -15,6 +15,7 @@ import {
   deviceDataQuery,
   directKeyQuery,
   directKeyWhere,
+  directValueQuery,
   toConfig,
   validateValue,
 } from './utils'
@@ -119,7 +120,39 @@ export class DirectModule implements Closable {
     }
   }
 
-  /** 下发指令到设备（未登记报文的指令码只落库，不下发） */
+  /**
+   * 手动控制（HTTP POST /api/control）：
+   * 合法性校验（手动通道专有，不影响自动控制） → 写 direct + 下发设备 + 记控制日志。
+   *
+   * 注意：校验只放在本方法（手动通道）——自动控制走 `setValue(source:'auto')`，
+   * 若把「自动控制开启时禁止手动」写进 setValue 会把自动控制自己拦掉。
+   * `auto` 开关实时查 direct 表（不走阈值配置缓存），保证改开关后立即生效。
+   */
+  public async control(params: ControlParams): Promise<void> {
+    const { target, action, d_no } = params
+
+    if (await this.isAutoEnabled(d_no)) {
+      throw new DirectModuleError('自动控制已开启，禁止手动控制')
+    }
+
+    const value = action === 'on' ? '1' : '0'
+    // 写库 + 下发设备 + WS direct 通知（保护性锁定会在此拦截「开启水泵」）
+    await this.setValue({ config_id: target, value, d_no, source: 'manual' })
+    await this.db().insert('control_log', controlLogRow(d_no, target, value, '手动控制'))
+    logger.info(`手动控制已执行: [${d_no}] ${target} = ${value} (${action})`)
+  }
+
+  /** 设备自动控制开关是否开启（实时查 direct 表，不受配置缓存影响） */
+  private async isAutoEnabled(d_no: string): Promise<boolean> {
+    const rows = await this.db().executeQuery<{ value: string | null }>(
+      directValueQuery('auto', d_no),
+    )
+    return rows[0]?.value === '1'
+  }
+
+  /**
+   * 下发指令到设备（未登记报文的指令码只落库，不下发）
+   */
   private dispatch(d_no: string, config_id: string, value: string): void {
     const message = buildControlMessage(config_id, value)
     if (!message) return
