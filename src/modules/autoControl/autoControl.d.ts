@@ -93,6 +93,20 @@ declare module '@modules/autoControl' {
     flowTargetEnabled: boolean
     /** 累计流量目标(L)：达到即关水泵（连带关加热） */
     totalFlowTarget: number
+    /** PID 控温是否启用 */
+    pidEnabled: boolean
+    /** PID 目标温度(°C) */
+    pidTarget: number
+    /** PID 比例系数（每 °C 占空比） */
+    pidKp: number
+    /** PID 积分系数 */
+    pidKi: number
+    /** PID 微分系数 */
+    pidKd: number
+    /** PID PWM 周期(秒)：一个周期内按占空比开关加热 */
+    pidCycle: number
+    /** PID 检测传感器：1=升温1(temp_in) 2=升温2(temp_out) */
+    pidSensor: number
   }
 
   /** 设备上报轨迹（离线监控用） */

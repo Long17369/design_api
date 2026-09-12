@@ -21,7 +21,7 @@
 - [x] `reverseTemp` 逆温差（已实现）：**加热中** 且 出水(`wen_du2`) < 进水(`wen_du1`) − Δ 持续 `reverse_temp_seconds`(60s) → 黄色预警（**不控制设备**、不加锁）；状态组件自持（`since`/`alerted`，恢复正常即解除并可再次触发）；缺测/未加热不判定；`reverse_temp_seconds=0` 关闭。配置：`reverse_temp_delta`(2°C) / `reverse_temp_seconds`(60s)
 - [x] `pumpIdle` 水泵空转（已实现，**并入 `flow_zero` 组件**）：水泵运行中 + 瞬时流量归零持续 `pump_idle_seconds`(60s) → 关泵（引擎自动先关加热）+ 黄色告警；**不加锁、不判堵塞**、流量恢复自动解除；`pump_idle_seconds=0` 关闭该保护。原「瞬时流量归零立即判堵塞」会误伤（泵停时流量本就为 0 + 单帧抖动即上锁），已修正为「泵运行 + 去抖 + 可恢复」
 - [ ] `pfMismatch` 压力流量不匹配：**暂缓** —— 等真实数据标定 X/Y 阈值后再做（「建议降功率」需设备支持调速，暂不做）
-- [ ] `pidTemp` PID 控温：完整 PID + PWM 开关加热；每次切换都会下发指令，需先评估下发频率上限
+- [x] `pidTemp` PID 控温（已实现）：完整 PID（Kp/Ki/Kd，积分限幅防 windup）+ **PWM**（每 `pid_cycle` 秒一个周期，按占空比开关加热，每周期最多开关各一次 → 下发次数有界）；泵未运行/温度缺测不输出（防干烧）并重置 PID 状态；priority 75，排在恒温保护（80）之前，**超温等安全判定仍会覆盖其输出**；默认关闭（`pid_enabled=0`）。配置：`pid_target`(30)/`pid_kp`(4)/`pid_ki`(0.02)/`pid_kd`(0.5)/`pid_cycle`(60s)/`pid_sensor`(2)
 - [x] 组件状态自持重构：计时/激活态已从共享 `DeviceState` 收回组件内部（`flowUnchanged` 计时、`flowTarget` 已达目标标记），`DeviceState` 只留引擎级字段（`pumpOn`/`pumpStartedAt`/`blocked`/`history`）；引擎 `close()` 统一调组件 `clearState()`
 - [x] 组件 `history` 需求接口：`AutoComponent.historyLength?(ctx)`（可空实现，默认 1 帧），引擎取所有组件需求的最大值统一裁剪（`tempAnomaly` 声明 `temp1RiseCount + 1`）；`history` 仍共享
 

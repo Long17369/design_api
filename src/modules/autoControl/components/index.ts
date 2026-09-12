@@ -3,6 +3,7 @@ import { flowTargetComponent } from './flowTarget'
 import { flowUnchangedComponent } from './flowUnchanged'
 import { flowZeroComponent } from './flowZero'
 import { highPressureComponent } from './highPressure'
+import { pidTempComponent } from './pidTemp'
 import { pressureZeroComponent } from './pressureZero'
 import { reverseTempComponent } from './reverseTemp'
 import { tempAnomalyComponent } from './tempAnomaly'
@@ -23,6 +24,7 @@ export const autoComponents: AutoComponent[] = [
   tempAnomalyComponent,
   highPressureComponent,
   reverseTempComponent,
+  pidTempComponent,
   tempLimitComponent,
   flowTargetComponent,
 ].sort((a, b) => a.priority - b.priority)

@@ -63,6 +63,13 @@ export function buildAutoConfig(
     reverseTempSeconds: numOr('reverse_temp_seconds', 60),
     flowTargetEnabled: pick('flow_target_enabled') === '1',
     totalFlowTarget: numOr('total_flow_target', 100),
+    pidEnabled: pick('pid_enabled') === '1',
+    pidTarget: numOr('pid_target', 30),
+    pidKp: numOr('pid_kp', 4),
+    pidKi: numOr('pid_ki', 0.02),
+    pidKd: numOr('pid_kd', 0.5),
+    pidCycle: numOr('pid_cycle', 60),
+    pidSensor: numOr('pid_sensor', 2),
   }
 }
 
