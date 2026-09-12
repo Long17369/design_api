@@ -132,7 +132,8 @@ export async function setControl(
 
 /**
  * 写告警（error_msg）并 WS 推送。
- * 文案/等级/颜色由命中组件的 AlarmDef 直接给出（不做集中翻译），reason 仅落 control_log。
+ * 文案/等级/颜色/类型由命中组件的 AlarmDef 给出（不做集中翻译），reason 仅落 control_log。
+ * `error_msg.field3` 用 `alarm.category`（默认 'block'，供堵塞预警补推筛选）。
  */
 export async function sendAlarm(
   db: Database,
@@ -146,12 +147,12 @@ export async function sendAlarm(
     c_time: cTime,
     field1: alarm.message,
     field2: alarm.code,
-    field3: 'block',
+    field3: alarm.category ?? 'block',
   })
   const data: WsAlarm = {
     id: `alarm_${dNo}_${cTime}`,
     d_no: dNo,
-    type: 'alarm',
+    type: alarm.type ?? 'alarm',
     message: alarm.message,
     code: alarm.code,
     level: alarm.level,
