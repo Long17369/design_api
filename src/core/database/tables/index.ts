@@ -19,6 +19,7 @@ import error_msg from './error_msg'
 import error_msg_mapper from './error_msg_mapper'
 import direct from './direct'
 import direct_config from './direct_config'
+import device_locks from './device_locks'
 
 export {
   ColumnTypeBase,
@@ -40,6 +41,7 @@ const tables: TableInfo[] = [
   error_msg_mapper,
   direct,
   direct_config,
+  device_locks,
 ]
 
 // 运行时由 Database.initTableTools() 在数据库初始化完成后填充

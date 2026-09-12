@@ -177,7 +177,7 @@ export interface ControlRecord {
 }
 
 // ========== WebSocket 推送事件类型 ==========
-export type WsEventType = 'data' | 'alarm' | 'direct'
+export type WsEventType = 'data' | 'alarm' | 'direct' | 'lock'
 
 // WebSocket 传感器数据推送（新数据结构）
 export interface WsData {
@@ -226,7 +226,26 @@ export interface WsDirectUpdate {
   error?: string // 修改失败的错误信息
 }
 
-export type WsMessageData = WsData | WsAlarm | WsDirectUpdate
+/**
+ * WebSocket 锁状态推送（服务端保护性锁定变更：堵塞 / 过压 / 空转 / 泄漏）。
+ * 锁本身由后端 `@core/locks` 统一管理（内存为准，落库 `device_locks` 供重启恢复）。
+ */
+export interface WsLock {
+  d_no: string
+  /** 变更后设备是否仍处于锁定 */
+  locked: boolean
+  /** 变更后仍有效的锁类型（空数组 = 已无锁） */
+  active: string[]
+  /** 本次变化的锁类型（解锁时保留，便于前端定位） */
+  type?: string
+  /** 锁定原因（告警码或描述） */
+  reason?: string
+  /** 限时锁到期时间戳(ms)；长期锁缺省 */
+  expiresAt?: number
+  timestamp: string
+}
+
+export type WsMessageData = WsData | WsAlarm | WsDirectUpdate | WsLock
 
 export interface WsMessage {
   event: WsEventType
