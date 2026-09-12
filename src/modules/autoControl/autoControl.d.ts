@@ -71,6 +71,10 @@ declare module '@modules/autoControl' {
     tempMaxSensor: number
     /** 恒温下限检测传感器：1=升温1(temp_in) 2=升温2(temp_out) */
     tempMinSensor: number
+    /** 逆温差阈值(°C)：加热中出水低于进水该值以上即视为异常 */
+    reverseTempDelta: number
+    /** 逆温差持续秒数：超过该时长才预警 */
+    reverseTempSeconds: number
     /** 累计流量目标是否启用 */
     flowTargetEnabled: boolean
     /** 累计流量目标(L)：达到即关水泵（连带关加热） */

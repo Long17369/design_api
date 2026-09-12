@@ -145,6 +145,8 @@ export const TABLE_SEEDS: TableSeed[] = [
       ['temp_min',               'auto', '1',  '恒温下限(°C)',       '2', null,              null, '100', '0',  '51',   'control', null, null, 'float',  '10'],
       ['temp_max_sensor',        'auto', '1',  '恒温上限传感器',     '5', '升温1:1|升温2:2', null, null,  null, '52',   'control', null, null, 'int',    '2'],
       ['temp_min_sensor',        'auto', '1',  '恒温下限传感器',     '5', '升温1:1|升温2:2', null, null,  null, '53',   'control', null, null, 'int',    '2'],
+      ['reverse_temp_delta',     'auto', '1',  '逆温差阈值(°C)',    '2', null,              null, '50',  '0',  '60',   'control', null, null, 'float',  '2'],
+      ['reverse_temp_seconds',   'auto', '1',  '逆温差持续(秒)',    '2', null,              null, '3600','0',  '61',   'control', null, null, 'int',    '60'],
       ['flow_target_enabled',    'auto', '1',  '累计流量目标开关',   '1', '关:0|开:1',       null, null,  null, '70',   'control', null, null, 'string', '0'],
       ['total_flow_target',      'auto', '1',  '累计流量目标(L)',    '2', null,              null, null,  null, '71',   'control', null, null, 'float',  '100'],
     ],

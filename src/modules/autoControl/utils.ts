@@ -57,6 +57,8 @@ export function buildAutoConfig(
     tempMin: numOr('temp_min', 10),
     tempMaxSensor: numOr('temp_max_sensor', 2),
     tempMinSensor: numOr('temp_min_sensor', 2),
+    reverseTempDelta: numOr('reverse_temp_delta', 2),
+    reverseTempSeconds: numOr('reverse_temp_seconds', 60),
     flowTargetEnabled: pick('flow_target_enabled') === '1',
     totalFlowTarget: numOr('total_flow_target', 100),
   }

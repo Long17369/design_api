@@ -4,6 +4,7 @@ import { flowUnchangedComponent } from './flowUnchanged'
 import { flowZeroComponent } from './flowZero'
 import { highPressureComponent } from './highPressure'
 import { pressureZeroComponent } from './pressureZero'
+import { reverseTempComponent } from './reverseTemp'
 import { tempAnomalyComponent } from './tempAnomaly'
 import { tempLimitComponent } from './tempLimit'
 
@@ -21,6 +22,7 @@ export const autoComponents: AutoComponent[] = [
   flowUnchangedComponent,
   tempAnomalyComponent,
   highPressureComponent,
+  reverseTempComponent,
   tempLimitComponent,
   flowTargetComponent,
 ].sort((a, b) => a.priority - b.priority)
