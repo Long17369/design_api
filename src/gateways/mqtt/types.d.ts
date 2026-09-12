@@ -1,16 +1,11 @@
-import { MQTTConfig, MQTTMessageOut, MQTTMessageIn } from '.'
+import { MQTTConfig, MQTTMessageIn } from '.'
 import { TopicHandler } from './components'
+import { MQTTMessageOut } from '@/types/types'
 
 declare module '@gateways/mqtt' {
   interface MQTTConfig {
     mqtt_host: string
     mqtt_port: number
-  }
-  type MQTTPayloadType = string | number | boolean | object | null
-  type MQTTPayload = Record<string, MQTTPayloadType>
-  interface MQTTMessageOut {
-    topic: string
-    payload: MQTTPayload
   }
   /** 入站主题注册表元素类型（主题处理器，负载类型由各主题自行约束） */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -2,7 +2,8 @@ import mqtt from 'mqtt'
 import { log } from '@core/logger'
 import { bus } from '@core/bus'
 import { Closable } from '@core/lifecycle'
-import { MQTTConfig, MQTTMessageOut, TopicHandlers } from '.'
+import { MQTTConfig, TopicHandlers } from '.'
+import { MQTTMessageOut } from '@/types/types'
 import topics from './components'
 
 const logger = log.getLogger('MqttGateway')

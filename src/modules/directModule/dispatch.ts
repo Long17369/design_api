@@ -1,4 +1,4 @@
-import { MQTTMessageOut } from '@gateways/mqtt'
+import { MQTTMessageOut } from '@/types/types'
 import { ControlCommandGroup, ModbusCommand } from '.'
 
 /**
