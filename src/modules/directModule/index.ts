@@ -6,6 +6,7 @@ import { lockManager } from '@core/locks'
 import { formatNow } from '@core/utils'
 import { Direct, DirectConfig, WsAlarm, WsDirectUpdate } from '@/types/types'
 import { DirectConfigRow, SetValueParams } from '.'
+import { buildControlMessage } from './dispatch'
 import {
   CONFIG_LIST_QUERY,
   DirectModuleError,
@@ -88,30 +89,42 @@ export class DirectModule implements Closable {
   }
 
   /**
-   * 修改某设备的某条指令值（校验后 UPSERT 到 direct 表），并推送 direct 变更通知。
-   * // TODO: 真实控制下发（MQTT 发布 / 控制总线）待接入，当前仅落库。
+   * 修改某设备的某条指令值：校验 → UPSERT 到 direct 表 → 下发设备 → 推送 direct 通知。
+   * 下发报文定义见 ./dispatch.ts（设备端接口变动的唯一改动点）。
    */
   public async setValue(params: SetValueParams): Promise<void> {
     const { config_id, value, d_no, source = 'manual', notify = true } = params
-    if (!notify) {
-      // 内部标记（如 blocked）：只落库，不推送 direct 通知（前端由 alarm/reset 事件感知）
-      await this.writeValue(config_id, value, d_no)
-      return
-    }
+
+    let storedValue: string
     try {
-      const storedValue = await this.writeValue(config_id, value, d_no)
-      this.emitDirect({ d_no, config_id, source, success: true, value: storedValue })
+      storedValue = await this.writeValue(config_id, value, d_no)
     } catch (err) {
       // 失败也通知前端（如被保护性锁定拦截），随后原样抛出
-      this.emitDirect({
-        d_no,
-        config_id,
-        source,
-        success: false,
-        error: err instanceof Error ? err.message : String(err),
-      })
+      if (notify) {
+        this.emitDirect({
+          d_no,
+          config_id,
+          source,
+          success: false,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
       throw err
     }
+
+    // 写库成功后：先下发设备，再通知前端（前端刷新时指令已发出）
+    this.dispatch(d_no, config_id, storedValue)
+    if (notify) {
+      this.emitDirect({ d_no, config_id, source, success: true, value: storedValue })
+    }
+  }
+
+  /** 下发指令到设备（未登记报文的指令码只落库，不下发） */
+  private dispatch(d_no: string, config_id: string, value: string): void {
+    const message = buildControlMessage(config_id, value)
+    if (!message) return
+    bus.emitEvent('MQTT_PUBLISH', message)
+    logger.info(`指令下发设备: [${d_no}] ${config_id} = ${value} → topic=${message.topic}`)
   }
 
   /**
