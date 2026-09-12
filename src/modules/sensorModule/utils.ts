@@ -76,17 +76,6 @@ export function accumulateFlow(state: DeviceState, flowRate: number | null, now:
   return state.totalFlow
 }
 
-/** 累计流量取值：flowSource=1 本地累加，否则用设备上报值 */
-export function resolveTotalFlow(
-  raw: DataPayload,
-  state: DeviceState,
-  flowRate: number | null,
-  now: number,
-  flowSource: number,
-): string {
-  return flowSource === 1 ? fmt(accumulateFlow(state, flowRate, now)) : toStr(raw.liu_liang1)
-}
-
 /** 窗口内温度变化率(°C/min)：最新 − 最早 除以分钟差；样本不足返回 '' */
 export function calcHeatRate(samples: SensorSample[], windowSec: number, now: number): string {
   const win = samples.filter((s) => s.t >= now - windowSec * 1000)

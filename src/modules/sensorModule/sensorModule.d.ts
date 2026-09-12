@@ -30,8 +30,6 @@ declare module '@modules/sensorModule' {
     heatRateWindow: number
     /** avg_flow 窗口(秒) */
     avgFlowWindow: number
-    /** 累计流量来源：0=设备上报 1=本地计算 */
-    flowSource: number
   }
 }
 

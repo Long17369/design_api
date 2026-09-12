@@ -5,13 +5,14 @@ import { Database } from '@core/database'
 import { DataPayload, FieldMapper, WsData } from '@/types/types'
 import { DeviceState, SensorConfig } from '@modules/sensorModule'
 import {
+  accumulateFlow,
   buildSensorRow,
   calcAvgFlow,
   calcHeatRate,
+  fmt,
   intOr,
   parseTime,
   pushSample,
-  resolveTotalFlow,
   toNum,
   toWsData,
 } from './utils'
@@ -94,8 +95,8 @@ export class SensorModule implements Closable {
     pushSample(state.tempSamples, now, toNum(raw.temp_out), windowSec)
     pushSample(state.flowSamples, now, flowRate, windowSec)
 
-    // 2. 计算派生指标
-    const totalFlow = resolveTotalFlow(raw, state, flowRate, now, config.flowSource)
+    // 2. 计算派生指标（累计流量固定为本地累加：设备端已无累计流量上报）
+    const totalFlow = fmt(accumulateFlow(state, flowRate, now))
     const data: WsData = {
       ...toWsData(raw),
       liu_liang1: totalFlow,
@@ -143,7 +144,6 @@ export class SensorModule implements Closable {
     const value: SensorConfig = {
       heatRateWindow: intOr(byCode.get('heat_rate_window'), 60),
       avgFlowWindow: intOr(byCode.get('avg_flow_window'), 60),
-      flowSource: intOr(byCode.get('flow_source'), 1),
     }
     this.configCache = { at: now, value }
     return value
