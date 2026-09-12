@@ -4,8 +4,8 @@ import { Closable } from '@core/lifecycle'
 import { Database } from '@core/database'
 import { lockManager } from '@core/locks'
 import { formatNow } from '@core/utils'
-import { Direct, DirectConfig, WsAlarm } from '@/types/types'
-import { DirectConfigRow } from '.'
+import { Direct, DirectConfig, WsAlarm, WsDirectUpdate } from '@/types/types'
+import { DirectConfigRow, SetValueParams } from '.'
 import {
   CONFIG_LIST_QUERY,
   DirectModuleError,
@@ -88,16 +88,63 @@ export class DirectModule implements Closable {
   }
 
   /**
-   * 修改某设备的某条指令值（校验后 UPSERT 到 direct 表）。
-   * // TODO: 真实控制下发（MQTT 发布 / 控制总线 / 控制日志记录）待接入，
-   *       当前仅落库，供 HTTP API 使用。
+   * 修改某设备的某条指令值（校验后 UPSERT 到 direct 表），并推送 direct 变更通知。
+   * // TODO: 真实控制下发（MQTT 发布 / 控制总线）待接入，当前仅落库。
    */
-  public async setValue(params: {
-    config_id: string
-    value: string | number
+  public async setValue(params: SetValueParams): Promise<void> {
+    const { config_id, value, d_no, source = 'manual', notify = true } = params
+    if (!notify) {
+      // 内部标记（如 blocked）：只落库，不推送 direct 通知（前端由 alarm/reset 事件感知）
+      await this.writeValue(config_id, value, d_no)
+      return
+    }
+    try {
+      const storedValue = await this.writeValue(config_id, value, d_no)
+      this.emitDirect({ d_no, config_id, source, success: true, value: storedValue })
+    } catch (err) {
+      // 失败也通知前端（如被保护性锁定拦截），随后原样抛出
+      this.emitDirect({
+        d_no,
+        config_id,
+        source,
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      })
+      throw err
+    }
+  }
+
+  /**
+   * 推送指令变更通知（前端配置面板按 d_no 过滤后防抖刷新；失败用于错误提示）
+   */
+  private emitDirect(data: {
     d_no: string
-  }): Promise<void> {
-    const { config_id, value, d_no } = params
+    config_id: string
+    source: SetValueParams['source']
+    success: boolean
+    value?: string
+    error?: string
+  }): void {
+    const { d_no, config_id, source, success, value, error } = data
+    const message: WsDirectUpdate = {
+      d_no,
+      config_id,
+      success,
+      ...(source !== undefined ? { source } : {}),
+      ...(value !== undefined ? { value } : {}),
+      ...(error !== undefined ? { error } : {}),
+    }
+    bus.emitEvent('WS_MESSAGE_OUT', { message: { event: 'direct', data: message } })
+  }
+
+  /**
+   * 写入 direct 表（校验 + UPSERT），返回规范化后的存储值。
+   */
+  private async writeValue(
+    config_id: string,
+    value: string | number,
+    d_no: string,
+  ): Promise<string> {
     const db = this.db()
 
     // 保护性锁定：被锁设备禁止开启水泵（关闭动作不受限，保护动作可正常执行）
@@ -119,6 +166,7 @@ export class DirectModule implements Closable {
       await db.insert('direct', { config_id, value: storedValue, d_no })
     }
     logger.info(`指令已更新: [${d_no}] ${config_id} = ${storedValue}`)
+    return storedValue
   }
 
   /**
@@ -130,8 +178,8 @@ export class DirectModule implements Closable {
   public async resetBlock(d_no: string): Promise<void> {
     const db = this.db()
 
-    // 1. 清除持久化堵塞标记
-    await this.setValue({ config_id: 'blocked', value: '0', d_no })
+    // 1. 清除持久化堵塞标记（内部标记，不推 direct 通知）
+    await this.setValue({ config_id: 'blocked', value: '0', d_no, source: 'manual', notify: false })
 
     // 2. 取回锁定前快照并释放全部保护锁
     const snapshot = lockManager.getSnapshot(d_no)
@@ -141,7 +189,7 @@ export class DirectModule implements Closable {
     const reason = '手动复位：恢复运行'
     for (const target of ['heat', 'water'] as const) {
       if (snapshot?.[target] !== '1') continue
-      await this.setValue({ config_id: target, value: '1', d_no })
+      await this.setValue({ config_id: target, value: '1', d_no, source: 'manual' })
       await db.insert('control_log', controlLogRow(d_no, target, '1', reason))
     }
     lockManager.clearSnapshot(d_no)

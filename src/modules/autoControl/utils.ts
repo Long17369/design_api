@@ -74,7 +74,7 @@ export async function setControl(
   value: '0' | '1',
   reason: string,
 ): Promise<void> {
-  await dm.setValue({ config_id: target, value, d_no: dNo })
+  await dm.setValue({ config_id: target, value, d_no: dNo, source: 'auto' })
   await db.insert('control_log', {
     d_no: dNo,
     c_time: formatNow(),

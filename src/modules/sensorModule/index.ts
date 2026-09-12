@@ -24,7 +24,8 @@ const CACHE_TTL = 60_000
 
 /**
  * 传感器数据模块：
- * 订阅 MQTT 原始上报（SENSOR_DATA_RAW）→ 计算派生指标 → 落库 sensor_data → 再分发（SENSOR_DATA）。
+ * 订阅 MQTT 原始上报（SENSOR_DATA_RAW）→ 计算派生指标 → 落库 sensor_data
+ * → 再分发（SENSOR_DATA 供业务模块消费；WS_MESSAGE_OUT event='data' 推送给前端）。
  */
 export class SensorModule implements Closable {
   private database: Database | null = null
@@ -110,8 +111,9 @@ export class SensorModule implements Closable {
       await db.insert('sensor_data', row)
     }
 
-    // 4. 再分发
+    // 4. 再分发：总线事件（供自动控制/告警等消费）+ WS 实时推送（前端曲线/面板）
     bus.emitEvent('SENSOR_DATA', data)
+    bus.emitEvent('WS_MESSAGE_OUT', { message: { event: 'data', data } })
     logger.debug(
       `传感器数据处理完成 d_no=${data.d_no} heat_rate=${data.heat_rate} avg_flow=${data.avg_flow}`,
     )

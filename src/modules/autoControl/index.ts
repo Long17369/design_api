@@ -180,7 +180,14 @@ export class AutoControlModule implements Closable {
       snapshot,
     })
     logger.info(`堵塞保护已锁定设备 ${dNo}（手动复位前不自动解除）`)
-    await dm.setValue({ config_id: 'blocked', value: '1', d_no: dNo })
+    // 内部标记：只落库，不推 direct 通知（前端由 alarm 事件驱动横幅）
+    await dm.setValue({
+      config_id: 'blocked',
+      value: '1',
+      d_no: dNo,
+      source: 'auto',
+      notify: false,
+    })
   }
 
   /** 进程重启/首帧时按持久化标记恢复堵塞锁（无快照） */
