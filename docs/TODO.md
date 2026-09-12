@@ -15,7 +15,7 @@
 - [x] 堵塞保护：打散为 4 个独立判定 —— `pressureZero`(10) / `flowZero`(12) / `flowUnchanged`(14) / `tempAnomaly`(16)，命中即 `heat=0+water=0` + 持久化 `blocked` + 加锁 + 告警
 - [x] 恒温保护 `tempLimit`(80)：超 `temp_max` 关加热；低于 `temp_min` 且水泵运行中才开加热（防干烧）；上限优先；幂等
 - [x] 累计流量目标 `flowTarget`(70)：跨越 `total_flow_target` 关泵一次，可随累计流量回落/调大目标重新触发
-- [ ] `overpressure` 冷却期：超压 → 关泵 + 加锁（**锁即状态**：冷却期就用锁的 `expiresAt`，不再另存 `DeviceState`）→ 期满且压力回落自动恢复开泵；「冷却期时长 / 是否自动解锁 / 解锁后行为」做成配置项
+- [x] `overpressure` 冷却期（已实现）：超压 → 关加热关泵 + 加 `overpressure` 锁（**锁即状态**，冷却期 = 锁的 `expiresAt`）；期满压力仍高 → **顺延**（保留原快照）；压力回落 → 解锁，行为按配置：`overpressure_delay`(20s) / `overpressure_auto_release`(1) / `overpressure_on_release`(hold|resume，默认 hold)；`delay=0` 表示不限时（只等压力回落）
 - [ ] `reverseTemp` 逆温差：加热中且出水 < 进水 − Δ 持续 N 秒 → 预警；激活状态由**组件自持**（不外溢到 `DeviceState` 等上层类型），需要读取时经引擎 `ctx` 暴露的接口（不做组件间直接 import）
 - [ ] `pumpIdle` 水泵空转：**合并进 `flowZero`**（同一「流量归零」判定链，不新开组件）；去抖时长（N 秒/N 帧）做成开关
 - [ ] `pfMismatch` 压力流量不匹配：**暂缓** —— 等真实数据标定 X/Y 阈值后再做（「建议降功率」需设备支持调速，暂不做）

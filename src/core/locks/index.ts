@@ -23,6 +23,15 @@ export class LockManager {
     return (this.locks.get(d_no) ?? []).filter((lock) => this.isValid(lock))
   }
 
+  /**
+   * 获取指定类型的锁（**不过滤已过期**）。
+   * 供需要感知「冷却期已结束」的调用方使用（如过压保护在处理解锁/顺延时），
+   * 而 `getActive` 只用于「当前是否仍被限制」的判断。
+   */
+  public get(d_no: string, type: LockType): DeviceLock | undefined {
+    return (this.locks.get(d_no) ?? []).find((lock) => lock.type === type)
+  }
+
   /** 加锁（同类型覆盖，避免重复加锁）；携带 snapshot 时更新锁定前状态快照 */
   public acquire(lock: DeviceLock): void {
     const list = (this.locks.get(lock.d_no) ?? []).filter((item) => item.type !== lock.type)

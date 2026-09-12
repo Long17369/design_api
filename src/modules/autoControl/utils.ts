@@ -44,6 +44,9 @@ export function buildAutoConfig(
   return {
     pressureZero: numOr('pressure_zero', 0.01),
     overpressureLimit: numOr('overpressure_limit', 20),
+    overpressureDelay: numOr('overpressure_delay', 20),
+    overpressureAutoRelease: pick('overpressure_auto_release') === '1',
+    overpressureOnRelease: pick('overpressure_on_release') === 'resume' ? 'resume' : 'hold',
     flowRateZero: numOr('flow_rate_zero', 0.01),
     pumpStartGrace: numOr('pump_start_grace', 10),
     flowUnchangedSeconds: numOr('flow_unchanged_seconds', 15),
