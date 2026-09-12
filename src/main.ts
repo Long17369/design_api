@@ -35,7 +35,8 @@ async function main() {
   const autoControl = new AutoControlModule()
   autoControl.setDatabase(database)
   autoControl.setDirectModule(directModule)
-  new AlarmModule()
+  const alarmModule = new AlarmModule()
+  alarmModule.setDatabase(database)
 
   // 3. 优雅关闭：标准事件通知 —— main 只负责触发 'shutdown' 事件，
   //    各模块（构造时订阅）收到通知后自行 close 释放资源

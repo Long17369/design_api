@@ -64,11 +64,8 @@ export class WebSocketServer implements Closable {
       // 下发欢迎消息（携带 goal，供业务侧定向推送）
       ws.send(JSON.stringify(buildWelcomeMessage(goal)))
 
-      // 通知业务侧：客户端已连接（携带 goal，可用于后续定向推送）
+      // 通知业务侧：客户端已连接（携带 goal，可用于后续定向推送；如补推堵塞预警）
       bus.emitEvent('WS_CLIENT_CONNECTED', { goal, ip })
-
-      // 补推持久化的堵塞预警（前端断开重连后恢复实时横幅）
-      await this.pushBlockedAlarms(ws)
 
       ws.on('close', () => {
         logger.info(`WebSocket 客户端已断开: ${ip} (goal=${goal})`)
@@ -155,14 +152,5 @@ export class WebSocketServer implements Closable {
   private isGoalActive(goal: string): boolean {
     const ws = this.goalIndex.get(goal)
     return !!ws && ws.readyState === WebSocket.OPEN
-  }
-
-  /**
-   * 补推所有处于堵塞状态的设备预警（WS 连接时调用）。
-   * // TODO: 移入 AlarmModule 并接入 Database 实现（表 direct / error_msg）；
-   *       当前为占位，不再使用旧表名 t_direct/t_error_msg 的裸 SQL。
-   */
-  private async pushBlockedAlarms(ws: WebSocket): Promise<void> {
-    logger.debug(`补推堵塞预警暂未实现 (client readyState=${ws.readyState})`)
   }
 }
