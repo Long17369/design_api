@@ -130,6 +130,7 @@ export const TABLE_SEEDS: TableSeed[] = [
       ['water',                  'auto', '0',  '水泵开关',           '1', '关:0|开:1',       null, null,  null, '2',    'control', null, null, 'string', '0'],
       ['pressure_zero',          'auto', '1',  '压力归零阈值',       '3', null,              null, '1',   '0',  '10',   'control', null, null, 'float',  '0.01'],
       ['flow_rate_zero',         'auto', '1',  '瞬时流量归零阈值',   '2', null,              null, null,  null, '11',   'control', null, null, 'float',  '0.01'],
+      ['pump_idle_seconds',      'auto', '1',  '水泵空转判定(秒)',   '2', null,              null, '3600','0',  '12',   'control', null, null, 'int',    '60'],
       ['overpressure_limit',     'auto', '1',  '过压阈值(kPa)',      '2', null,              null, null,  null, '15',   'control', null, null, 'float',  '20'],
       ['overpressure_delay',     'auto', '1',  '过压冷却期(s)',      '2', null,              null, '3600','0',  '15.5', 'control', null, null, 'int',    '20'],
       ['overpressure_auto_release', 'auto', '1', '过压自动解锁',      '1', '关:0|开:1',       null, null,  null, '15.6', 'control', null, null, 'string', '1'],

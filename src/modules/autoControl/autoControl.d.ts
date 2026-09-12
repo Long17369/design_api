@@ -53,6 +53,8 @@ declare module '@modules/autoControl' {
     overpressureOnRelease: 'hold' | 'resume'
     /** 瞬时流量归零阈值 */
     flowRateZero: number
+    /** 水泵空转判定秒数：水泵运行中且流量归零持续该时长 → 关泵 + 告警；0 = 关闭该保护 */
+    pumpIdleSeconds: number
     /** 水泵启动宽限期(秒)：仅水泵刚启动时生效 */
     pumpStartGrace: number
     /** 累计流量不变持续秒数（超过视为堵塞） */
