@@ -204,6 +204,7 @@ export class AutoControlModule implements Closable {
         history: [],
         lastTotalFlow: null,
         flowUnchangedSince: null,
+        flowTargetReached: false,
       }
       this.devices.set(dNo, state)
     }

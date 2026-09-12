@@ -1,4 +1,5 @@
 import { AutoComponent } from '@modules/autoControl'
+import { flowTargetComponent } from './flowTarget'
 import { flowUnchangedComponent } from './flowUnchanged'
 import { flowZeroComponent } from './flowZero'
 import { highPressureComponent } from './highPressure'
@@ -21,4 +22,5 @@ export const autoComponents: AutoComponent[] = [
   tempAnomalyComponent,
   highPressureComponent,
   tempLimitComponent,
+  flowTargetComponent,
 ].sort((a, b) => a.priority - b.priority)

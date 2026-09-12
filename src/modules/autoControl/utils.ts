@@ -39,6 +39,8 @@ export async function loadAutoConfig(db: Database): Promise<AutoConfig> {
     tempMin: numOr('temp_min', 10),
     tempMaxSensor: numOr('temp_max_sensor', 2),
     tempMinSensor: numOr('temp_min_sensor', 2),
+    flowTargetEnabled: byCode.get('flow_target_enabled') === '1',
+    totalFlowTarget: numOr('total_flow_target', 100),
   }
 }
 

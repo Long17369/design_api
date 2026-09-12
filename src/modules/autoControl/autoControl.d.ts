@@ -63,6 +63,10 @@ declare module '@modules/autoControl' {
     tempMaxSensor: number
     /** 恒温下限检测传感器：1=升温1(temp_in) 2=升温2(temp_out) */
     tempMinSensor: number
+    /** 累计流量目标是否启用 */
+    flowTargetEnabled: boolean
+    /** 累计流量目标(L)：达到即关水泵（连带关加热） */
+    totalFlowTarget: number
   }
 
   /** 单设备运行状态 */
@@ -79,6 +83,8 @@ declare module '@modules/autoControl' {
     lastTotalFlow: number | null
     /** 累计流量开始不变的时刻(ms)，恢复变化时置 null */
     flowUnchangedSince: number | null
+    /** 是否已达成累计流量目标（跨越目标那一刻动作一次；低于目标时解除） */
+    flowTargetReached: boolean
   }
 
   /** 组件评估上下文 */
