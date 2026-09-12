@@ -216,22 +216,19 @@ export class DirectModule implements Closable {
   }
 
   /**
-   * 手动复位堵塞状态：
-   * 清 direct.blocked='0' → 取回并释放该设备全部保护锁 → 按锁定前快照恢复 heat/water
-   * （写库 + control_log）→ 广播 WS reset 事件（前端清除实时预警横幅）。
+   * 手动复位保护性锁定：
+   * 取回并释放该设备全部保护锁（锁通道自动删除 device_locks 持久化记录并推送锁状态）
+   * → 按锁定前快照恢复 heat/water（写库 + control_log）→ 广播 WS reset 事件（前端清除实时预警横幅）。
    * 故障历史（error_msg）永久保留，不删除。
    */
   public async resetBlock(d_no: string): Promise<void> {
     const db = this.db()
 
-    // 1. 清除持久化堵塞标记（内部标记，不推 direct 通知）
-    await this.setValue({ config_id: 'blocked', value: '0', d_no, source: 'manual', notify: false })
-
-    // 2. 取回锁定前快照并释放全部保护锁
+    // 1. 取回锁定前快照并释放全部保护锁
     const snapshot = lockManager.getSnapshot(d_no)
     lockManager.releaseAll(d_no)
 
-    // 3. 按快照恢复运行状态（无快照则保持当前值，不盲目开启）
+    // 2. 按快照恢复运行状态（无快照则保持当前值，不盲目开启）
     const reason = '手动复位：恢复运行'
     for (const target of ['heat', 'water'] as const) {
       if (snapshot?.[target] !== '1') continue
@@ -240,7 +237,7 @@ export class DirectModule implements Closable {
     }
     lockManager.clearSnapshot(d_no)
 
-    // 4. 广播复位事件（无 goal → 广播给所有客户端）
+    // 3. 广播复位事件（无 goal → 广播给所有客户端）
     const cTime = formatNow()
     const data: WsAlarm = {
       id: `reset_${d_no}_${cTime}`,

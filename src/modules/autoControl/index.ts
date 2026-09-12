@@ -89,9 +89,10 @@ export class AutoControlModule implements Closable {
 
     const state = this.getState(dNo)
 
-    // 堵塞记忆：一旦落定（direct.blocked='1'），数据恢复也不自动解除，须手动复位
-    if (values.get('blocked') === '1') {
-      this.restoreBlockedLock(dNo, state)
+    // 堵塞记忆：以**锁通道**为准（锁由 LockModule 从 device_locks 恢复），
+    // 数据恢复也不自动解除，须手动复位（POST /api/control/reset）
+    if (this.isBlockedLocked(dNo)) {
+      state.blocked = true
       return
     }
     state.blocked = false
@@ -139,7 +140,7 @@ export class AutoControlModule implements Closable {
   ): Promise<void> {
     const reason = decision.reason ?? name
     if (decision.block) {
-      await this.blockDevice(dm, ctx, reason)
+      await this.blockDevice(ctx, reason)
     }
     if (decision.controls?.length) {
       for (const c of decision.controls) {
@@ -154,10 +155,11 @@ export class AutoControlModule implements Closable {
 
   /**
    * 堵塞保护落定（仅首次）：
-   * 记录锁定前 heat/water 快照 → 加 blocked 锁（禁止开启水泵）→ 持久化 direct.blocked='1'。
+   * 记录锁定前 heat/water 快照 → 加 blocked 锁（禁止开启水泵）。
+   * 锁的持久化（device_locks 表）与 WS 推送由 LockModule 统一处理；
    * 之后数据恢复也不自动解除，须手动复位（POST /api/control/reset）。
    */
-  private async blockDevice(dm: DirectModule, ctx: AutoCtx, reason: string): Promise<void> {
+  private async blockDevice(ctx: AutoCtx, reason: string): Promise<void> {
     const { d_no: dNo, state, values } = ctx
     if (state.blocked) return
     state.blocked = true
@@ -174,22 +176,11 @@ export class AutoControlModule implements Closable {
       snapshot,
     })
     logger.info(`堵塞保护已锁定设备 ${dNo}（手动复位前不自动解除）`)
-    // 内部标记：只落库，不推 direct 通知（前端由 alarm 事件驱动横幅）
-    await dm.setValue({
-      config_id: 'blocked',
-      value: '1',
-      d_no: dNo,
-      source: 'auto',
-      notify: false,
-    })
   }
 
-  /** 进程重启/首帧时按持久化标记恢复堵塞锁（无快照） */
-  private restoreBlockedLock(dNo: string, state: DeviceState): void {
-    if (state.blocked) return
-    state.blocked = true
-    lockManager.acquire({ type: 'blocked', d_no: dNo, deny: { water: true }, reason: 'blocked' })
-    logger.info(`设备处于堵塞状态，已恢复保护锁（等待手动复位）: ${dNo}`)
+  /** 该设备是否存在堵塞锁（锁通道为唯一权威状态，重启后由 LockModule 从 device_locks 恢复） */
+  private isBlockedLocked(dNo: string): boolean {
+    return lockManager.getActive(dNo).some((lock) => lock.type === 'blocked')
   }
 
   /** 获取（或初始化）某设备状态 */

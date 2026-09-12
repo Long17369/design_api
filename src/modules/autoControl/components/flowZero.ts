@@ -10,7 +10,7 @@ const ALARM: AlarmDef = {
 
 /**
  * 堵塞判定②：瞬时流量归零 —— 瞬时流量 < flow_rate_zero。
- * 命中即执行堵塞保护（关加热 + 关水泵 + 持久化 direct.blocked 标记 + 加 blocked 锁 + 预警）。
+ * 命中即执行堵塞保护（关加热 + 关水泵 + 加 blocked 锁（持久化与推送由 LockModule 负责） + 预警）。
  * 相关配置：flow_rate_zero（瞬时流量归零阈值）
  */
 export const flowZeroComponent: AutoComponent = {
