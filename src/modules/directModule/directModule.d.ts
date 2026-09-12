@@ -32,7 +32,7 @@ declare module '@modules/directModule' {
     value: string | number
     d_no: string
     /** 变更来源：手动(HTTP/复位) / 自动控制 */
-    source?: 'manual' | 'auto' | 'config'
+    source?: 'manual' | 'auto' | 'config' | 'device'
     /** 是否推送 direct 通知（默认 true；仅需落库/下发而不通知前端时传 false） */
     notify?: boolean
   }
