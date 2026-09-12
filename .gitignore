@@ -37,6 +37,9 @@ build/
 .env.*.local
 config.json
 
+# 工作区临时产物（探针脚本 / 日志 / 样本 / DB 导出）
+tmp/
+
 # Mac system files
 .DS_Store
 
