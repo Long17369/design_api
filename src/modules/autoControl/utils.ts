@@ -15,8 +15,8 @@ export function toNum(value: string | number | null | undefined): number | null 
   return Number.isFinite(n) ? n : null
 }
 
-/** 读取自动控制阈值配置（direct_config.default_value） */
-export async function loadAutoConfig(db: Database): Promise<AutoConfig> {
+/** 读取阈值配置默认值（direct_config 的 code → default_value） */
+export async function loadConfigDefaults(db: Database): Promise<Map<string, string | null>> {
   const rows = await db.executeQuery<{ code: string; default_value: string | null }>({
     table: 'direct_config',
     columns: ['code', 'default_value'],
@@ -25,8 +25,22 @@ export async function loadAutoConfig(db: Database): Promise<AutoConfig> {
     limit: '100',
     offset: '0',
   })
-  const byCode = new Map(rows.map((row) => [row.code, row.default_value]))
-  const numOr = (code: string, def: number) => toNum(byCode.get(code)) ?? def
+  return new Map(rows.map((row) => [row.code, row.default_value]))
+}
+
+/**
+ * 生成阈值配置，取值优先级：**设备 direct 值 > direct_config.default_value > 内置默认**。
+ *
+ * `overrides` 为该设备的指令值（`direct` 表，即前端 `POST /api/direct/update` 写入的行），
+ * 因此前端按设备改配置对自动控制**立即生效**（设备值不缓存，每帧读取）。
+ */
+export function buildAutoConfig(
+  defaults: ReadonlyMap<string, string | null>,
+  overrides?: ReadonlyMap<string, string | null>,
+): AutoConfig {
+  // 空字符串视为「未设置」，回退到下一优先级
+  const pick = (code: string): string | null => (overrides?.get(code) || defaults.get(code)) ?? null
+  const numOr = (code: string, def: number) => toNum(pick(code)) ?? def
   return {
     pressureZero: numOr('pressure_zero', 0.01),
     overpressureLimit: numOr('overpressure_limit', 20),
@@ -39,9 +53,20 @@ export async function loadAutoConfig(db: Database): Promise<AutoConfig> {
     tempMin: numOr('temp_min', 10),
     tempMaxSensor: numOr('temp_max_sensor', 2),
     tempMinSensor: numOr('temp_min_sensor', 2),
-    flowTargetEnabled: byCode.get('flow_target_enabled') === '1',
+    flowTargetEnabled: pick('flow_target_enabled') === '1',
     totalFlowTarget: numOr('total_flow_target', 100),
   }
+}
+
+/**
+ * 读取自动控制阈值配置（一次性：默认值 + 可选设备覆盖）。
+ * 引擎热路径应改用 `loadConfigDefaults` + 缓存 + `buildAutoConfig` 逐帧合并。
+ */
+export async function loadAutoConfig(
+  db: Database,
+  overrides?: ReadonlyMap<string, string | null>,
+): Promise<AutoConfig> {
+  return buildAutoConfig(await loadConfigDefaults(db), overrides)
 }
 
 /** 按传感器标识取温度：1=升温1(wen_du1)、2=升温2(wen_du2)；无效返回 null */
