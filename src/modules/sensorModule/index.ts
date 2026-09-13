@@ -111,8 +111,8 @@ export class SensorModule implements Closable {
       avg_flow: calcAvgFlow(state.flowSamples, config.avgFlowWindow, now),
     }
 
-    // 2.5 跳变检测（数据质量标记 invalid：多帧累计 + 防抖，关闭时不参与）
-    if (config.spikeFrames > 0) {
+    // 2.5 跳变检测（数据质量标记 invalid：多帧累计 + 防抖，由 sensor_spike_enabled 开关控制）
+    if (config.spikeEnabled) {
       if (state.lastRaw && hasSpike(state.lastRaw, raw, config)) state.spikeCount += 1
       else state.spikeCount = 0
       if (state.spikeCount >= config.spikeFrames) data.invalid = true
@@ -196,7 +196,8 @@ export class SensorModule implements Closable {
         return {
           heatRateWindow: intOr(byCode.get('heat_rate_window'), 60),
           avgFlowWindow: intOr(byCode.get('avg_flow_window'), 60),
-          spikeFrames: intOr(byCode.get('sensor_spike_frames'), 0),
+          spikeEnabled: byCode.get('sensor_spike_enabled') === '1',
+          spikeFrames: Math.max(1, intOr(byCode.get('sensor_spike_frames'), 2)),
           spikeTemp: toNum(byCode.get('sensor_spike_temp')) ?? 10,
           spikePressure: toNum(byCode.get('sensor_spike_pressure')) ?? 20,
           spikeFlow: toNum(byCode.get('sensor_spike_flow')) ?? 100,

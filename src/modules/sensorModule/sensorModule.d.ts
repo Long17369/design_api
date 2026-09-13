@@ -36,7 +36,9 @@ declare module '@modules/sensorModule' {
     heatRateWindow: number
     /** avg_flow 窗口(秒) */
     avgFlowWindow: number
-    /** 跳变帧数阈值：连续 N 帧超出跳变阈值才标记 invalid；0 = 关闭跳变检测 */
+    /** 跳变检测是否启用（`sensor_spike_enabled`，默认关闭） */
+    spikeEnabled: boolean
+    /** 跳变帧数阈值：连续 N 帧超出跳变阈值才标记 invalid（启用时至少 1 帧） */
     spikeFrames: number
     /** 温度跳变阈值(°C) */
     spikeTemp: number

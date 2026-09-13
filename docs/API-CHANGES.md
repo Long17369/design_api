@@ -57,8 +57,28 @@
 
 - **锁持久化新表**：`device_locks`（由 Database 自动建表，无需手工建）
 - **删除历史遗留的堵塞标记配置行**（`direct_config.blocked` 已废弃，若不删会重新出现在 `/api/direct/config`）：
+
   ```sql
   DELETE FROM direct WHERE config_id = 'blocked';
   DELETE FROM direct_config WHERE code = 'blocked';
   ```
+
   执行后配置列表应为 **18** 项（原 19 项含内部标记）。堵塞状态改由 `device_locks` 保存，重启后自动恢复，手动复位时清除。
+
+- **配置层级迁移**（子配置需挂到各自开关，否则「未启用功能」的子项会一直显示在配置页）：
+
+  ```sql
+  UPDATE direct_config SET ref_code='pid_enabled', ref_value='1'
+    WHERE code IN ('pid_target','pid_kp','pid_ki','pid_kd','pid_cycle','pid_sensor');
+  UPDATE direct_config SET ref_code='flow_target_enabled', ref_value='1'
+    WHERE code = 'total_flow_target';
+  UPDATE direct_config SET ref_code='sensor_spike_enabled', ref_value='1'
+    WHERE code IN ('sensor_spike_frames','sensor_spike_temp','sensor_spike_pressure','sensor_spike_flow');
+  ```
+
+  seeds 只补缺失行、不覆盖既有行，故已存在的库需手工执行一次；`sensor_spike_enabled` 为新行，启动时自动补。
+
+  **层级门控语义**（与前端 `ControlPanel.isConfigVisible` 一致）：
+  无 `ref_code` → 恒可见；父不可见 → 子不可见（**递归**）；
+  父当前值取「设备 `direct` 值 → 父 `default_value` → 空」，为空则不可见；
+  `ref_value` 为空 → 父值非空即显示，否则按 `|` 分隔精确匹配（可多值，如 `0|2`）。

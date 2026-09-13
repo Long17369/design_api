@@ -161,3 +161,51 @@ export function controlLogRow(
     field5: reason,
   }
 }
+
+/**
+ * 按层级（`ref_id`/`ref_value`）过滤指令配置，只保留当前**可见**的配置。
+ *
+ * 语义与前端 `ControlPanel.isConfigVisible` 保持一致：
+ * - 无 `ref_id` → 可见（顶层配置）
+ * - 父配置不可见 → 不可见（**递归**判断，支持多层）
+ * - 父当前值取「设备值 → 父 `default_value` → 空」，为空则不可见
+ * - `ref_value` 为空 → 父值非空即可见；否则按 `|` 分隔做**精确匹配**（可多值，如 `'1|2'`）
+ *
+ * 用途：`GET /api/direct/config?d_no=` 时服务端先行过滤，
+ * 使「未启用功能的子配置」不出现在任何前端的配置页（前端自身过滤仍兼容）。
+ */
+export function filterVisibleConfigs(
+  configs: DirectConfig[],
+  values: ReadonlyMap<string, string> = new Map(),
+): DirectConfig[] {
+  const byId = new Map(configs.map((config) => [config.id, config]))
+  const memo = new Map<string, boolean>()
+
+  const isVisible = (config: DirectConfig): boolean => {
+    const cached = memo.get(config.id)
+    if (cached !== undefined) return cached
+
+    let result: boolean
+    if (!config.ref_id) {
+      result = true
+    } else {
+      const parent = byId.get(config.ref_id)
+      if (!parent || !isVisible(parent)) {
+        result = false
+      } else {
+        const parentValue = values.get(parent.id) || parent.default_value || ''
+        if (!parentValue) {
+          result = false
+        } else if (!config.ref_value) {
+          result = true
+        } else {
+          result = config.ref_value.split('|').includes(parentValue)
+        }
+      }
+    }
+    memo.set(config.id, result)
+    return result
+  }
+
+  return configs.filter((config) => isVisible(config))
+}

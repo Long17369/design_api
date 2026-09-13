@@ -264,14 +264,18 @@ export async function handleDataDevices(db: Database, _req: Request, res: Respon
 }
 
 /**
- * 处理 GET /direct/config —— 返回全部指令配置
+ * 处理 GET /direct/config —— 返回指令配置。
+ *
+ * 传 `?d_no=` 时按层级门控过滤（父开关未开启的子配置不返回），供配置页只展示可见项；
+ * 不传 `d_no` 时返回全量列表（保留旧行为，兼容需要完整清单的调用方）。
  */
 export async function handleDirectConfigList(
   dm: DirectModule,
-  _req: Request,
+  req: Request,
   res: Response,
 ): Promise<void> {
-  const data = await dm.listConfigs()
+  const dNo = firstQuery((req.query ?? {})['d_no'])
+  const data = await dm.listConfigs(dNo !== undefined && dNo !== '' ? dNo : undefined)
   res.status(200).json(successResponse(data))
 }
 
