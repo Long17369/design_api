@@ -39,7 +39,7 @@
 ## 测试
 
 - 单测：`tests/core/cache.test.ts`（读写 / tag 批量失效 / TTL / `remember` 只加载一次）。
-- 写穿透联动（Database 写库 → 缓存失效）在 `tmp/` 的 E2E 中验证，见 `docs/TESTING.md`。
+- 写穿透联动（Database 写库 → 缓存失效）在 `tests/e2e/` 的 E2E 中验证，见 `docs/TESTING.md`。
 
 ## 暂缓
 

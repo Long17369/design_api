@@ -10,7 +10,7 @@
 > 参考实现：后端 `~/code/web/mysql/mysql_node_api`（`src/services/**`）、前端 `~/code/web/IoT`
 > （`src/server/api.ts` 契约、`src/composables/useWebSocket.ts` 消费 WS）。
 >
-> 测试与校验命令见 `docs/TESTING.md`（`pnpm test` / `pnpm type-check` / `tmp/` 下的 E2E）。
+> 测试与校验命令见 `docs/TESTING.md`（`pnpm test` / `pnpm type-check` / `tests/e2e/` 下的 E2E）。
 
 ## 自动控制 · 保护组件（`src/modules/autoControl/components/`）
 
@@ -98,7 +98,7 @@
 - [x] 运行与校验：`tsx` 运行（勿用 ts-node）、`pnpm type-check` / `lint` / `format`
 - [x] 类型出口统一：`MQTTMessageOut` 以 `src/types/types.ts` 为唯一定义来源；`types.ts` 属对外契约保持稳定
 - [x] 清理：删除空 `runtime/` 目录、移除 `test` 占位脚本
-- [x] 测试工程化：已引入 **vitest**（`pnpm test`），`tests/` 下 24 个用例覆盖组件判定/告警/缓存/跳变检测；`pnpm type-check` 覆盖 `src`+`tests`；E2E 仍在 `tmp/`（依赖真实服务，说明见 `docs/TESTING.md`）
+- [x] 测试工程化：**vitest 单测**（`pnpm test`，`tests/` 7 文件 41 用例）覆盖组件判定/告警/PID/缓存/图表/配置层级/跳变检测；**E2E 全链路脚本已入库到 `tests/e2e/`**（22 个，依赖真实 MySQL/MQTT/服务，用法见 `docs/TESTING.md`）；`pnpm type-check` 覆盖 `src`+`tests`；`tmp/` 只留运行产物（已 gitignore）
 - [x] `MQTT_MESSAGE`：**保留**声明 —— 骨架期设计的「入站消息经 bus 广播」事件，后改为 topicHandlers 直接处理后闲置；将来做统一入站分发可复用（此处备注来历，不删）
 - [x] `errorMessage`：**暂留** —— 为后续「服务器驱动化」重构预留的事件通道，届时再定去留
 - [x] 死依赖：**不动**（`uuid` / `dotenv` / `nodemon` / `ts-node` 保留；`jiti` 为 ESLint 加载 TS 配置所需，勿删）
