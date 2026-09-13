@@ -3,7 +3,13 @@ import { LockManager } from '.'
 declare module '@core/locks' {
   LockManager
 
-  /** 设备级锁类型（统一锁定通道） */
+  /**
+   * 设备级锁类型（统一锁定通道）
+   *
+   * `leak` 为**预留**：当前无组件产生该锁（旧项目「严重泄漏」判定已被
+   * `pressureZero`（压力归零 → blocked）与 `flowZero`（泵开 + 流量 0 → 关泵）覆盖，
+   * 详见 `docs/TODO.md`）。成员保留以稳定对外契约，前端可能已有该枚举分支。
+   */
   type LockType = 'blocked' | 'overpressure' | 'pump_idle' | 'leak'
 
   /** 可被锁定的控制目标 */
