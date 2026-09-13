@@ -9,6 +9,7 @@ import {
   DATA_SOURCES,
   HttpError,
   errorResponse,
+  handleChart,
   handleCount,
   handleControl,
   handleControlReset,
@@ -138,6 +139,10 @@ export class HttpServer implements Closable {
       this.app.get(
         `${base}/time-range`,
         wrap((req, res) => handleTimeRange(this.db(), sourceDef, req, res)),
+      )
+      this.app.get(
+        `${base}/chart`,
+        wrap((req, res) => handleChart(this.db(), sourceDef, req, res)),
       )
     }
 

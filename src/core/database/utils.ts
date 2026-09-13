@@ -1,6 +1,6 @@
 import { log } from '@core/logger'
-import { DataQueryParams, Where } from '@/types/types'
-import { TableInfoBuilded } from '@core/database'
+import { DataQueryParams, Where, WhereCondition } from '@/types/types'
+import { ChartQueryParams, TableInfoBuilded } from '@core/database'
 import { ColumnInfo, TableInfo } from '@core/database/tables'
 import { SqlValue } from './tables'
 
@@ -10,6 +10,13 @@ const logger = log.getLogger('Database')
 const MAX_QUERY_LIMIT = 100
 /** 默认查询行数 */
 const DEFAULT_LIMIT = 10
+
+/** 图表聚合默认桶数（与旧实现一致） */
+export const DEFAULT_CHART_BUCKETS = 1000
+/** 图表聚合桶数上限（防止一次请求生成过多分组） */
+export const MAX_CHART_BUCKETS = 10_000
+/** 参与图表聚合的数据列：field1..N（与旧实现 AVG(field1..field7) 语义一致） */
+const CHART_FIELD_PATTERN = /^field\d+$/
 
 /** 反引号包裹标识符并转义内部反引号 */
 export function quote(name: string): string {
@@ -247,4 +254,63 @@ export function buildQuerySQL(
   params.push(limitNum, offsetNum)
 
   return { sql, params }
+}
+
+/**
+ * 计算图表聚合的时间桶步长（秒）：总时长 / 目标桶数，向上取整，最小 1 秒。
+ * 时间非法（无法解析 / start >= end）时退化为 1 秒（相当于不降采样）。
+ */
+export function resolveChartStep(start: string, end: string, buckets?: number): number {
+  const target = Math.max(
+    1,
+    Math.min(
+      Math.trunc(buckets ?? DEFAULT_CHART_BUCKETS) || DEFAULT_CHART_BUCKETS,
+      MAX_CHART_BUCKETS,
+    ),
+  )
+  const totalSeconds = (Date.parse(end) - Date.parse(start)) / 1000
+  if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return 1
+  return Math.max(1, Math.ceil(totalSeconds / target))
+}
+
+/**
+ * 构建图表聚合 SQL：按时间桶对数据列（`fieldN`）做 AVG 降采样，
+ * 桶标签取该桶内最大的 `c_time`，结果按时间升序。
+ *
+ * 与旧实现（`mysql_node_api` 的 `getChartData`）保持一致：
+ * `GROUP BY FLOOR(UNIX_TIMESTAMP(c_time) / step)`；额外支持附加 `where`（d_no 等）。
+ */
+export function buildChartSQL(
+  info: TableInfoBuilded,
+  params: ChartQueryParams,
+): { sql: string; params: SqlValue[] } {
+  if (!isColumnAllowed(info, 'c_time')) {
+    logger.error(`表 ${info.name} 没有 c_time 列，无法做图表聚合`)
+    throw new Error(`表 ${info.name} 没有 c_time 列，无法做图表聚合`)
+  }
+  const step = resolveChartStep(params.start, params.end, params.buckets)
+
+  const conditions: Where = {
+    ...(params.where ?? {}),
+    c_time: [
+      { operator: '>=', value: params.start },
+      { operator: '<=', value: params.end },
+    ] satisfies WhereCondition[],
+  }
+  const { sql: whereSQL, params: whereParams } = buildWhereSQL(info, conditions)
+
+  // 数据列（field1..N）按桶取平均；无可聚合列时只返回桶时间
+  const fields = [...info.columns.keys()].filter((name) => CHART_FIELD_PATTERN.test(name))
+  const averages = fields.map((name) => `AVG(${quote(name)}) AS ${quote(name)}`)
+  const selectList = [
+    `DATE_FORMAT(MAX(${quote('c_time')}), '%Y-%m-%d %H:%i:%s') AS ${quote('c_time')}`,
+  ]
+    .concat(averages)
+    .join(', ')
+
+  const sql =
+    `SELECT ${selectList} FROM ${quote(info.name)}${whereSQL}` +
+    ` GROUP BY FLOOR(UNIX_TIMESTAMP(${quote('c_time')}) / ?) ORDER BY ${quote('c_time')} ASC`
+
+  return { sql, params: [...whereParams, step] }
 }

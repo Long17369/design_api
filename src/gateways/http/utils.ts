@@ -102,6 +102,77 @@ export function parseListQuery(raw: unknown): {
   }
 }
 
+/** 取 query 参数的单一字符串值（express 可能给出数组） */
+function firstQuery(raw: unknown): string | undefined {
+  if (typeof raw === 'string') return raw
+  if (Array.isArray(raw) && typeof raw[0] === 'string') return raw[0]
+  return undefined
+}
+
+/** 'YYYY-MM-DD HH:mm:ss'（或带 T 的 ISO 变体）：用于校验图表时间段参数 */
+const CHART_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/
+
+/** 解析并校验图表时间段参数（非法抛 HttpError(400)） */
+function parseChartTime(raw: unknown, name: 'start' | 'end'): string {
+  const value = firstQuery(raw)
+  if (!value) {
+    throw new HttpError(400, 'INVALID_PARAMS', `缺少必填参数 ${name}`)
+  }
+  if (!CHART_TIME_PATTERN.test(value)) {
+    throw new HttpError(400, 'INVALID_PARAMETER', `${name} 格式应为 YYYY-MM-DD HH:mm:ss`)
+  }
+  return value.replace('T', ' ')
+}
+
+/** 解析图表桶数（可选，默认 1000，允许范围 1..10000） */
+function parseBuckets(raw: unknown): number | undefined {
+  const value = firstQuery(raw)
+  if (value === undefined || value === '') return undefined
+  const num = Number.parseInt(value, 10)
+  if (Number.isNaN(num) || num <= 0) {
+    throw new HttpError(400, 'INVALID_PARAMETER', 'buckets 必须是正整数')
+  }
+  return Math.min(num, 10_000)
+}
+
+/**
+ * 处理 GET /:source/chart —— 历史图表降采样数据（时间桶 AVG）。
+ *
+ * Query：`d_no`（可选，设备编号）、`start` / `end`（必填，'YYYY-MM-DD HH:mm:ss'）、
+ *        `buckets`（可选，默认 1000）、`where`（可选，JSON 过滤条件）。
+ * 返回：`ChartPoint[]`（`c_time` + 各数据列平均值，按时间升序）。
+ *
+ * 旧前端契约 `/api/data/chart` 由客户端 `api.ts` 的 'data'→'sensor' 重定向兼容。
+ */
+export async function handleChart(
+  db: Database,
+  def: DataSourceDef,
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const query = (req.query ?? {}) as Record<string, unknown>
+  const start = parseChartTime(query['start'], 'start')
+  const end = parseChartTime(query['end'], 'end')
+  if (Date.parse(end) < Date.parse(start)) {
+    throw new HttpError(400, 'INVALID_PARAMETER', 'start 不能晚于 end')
+  }
+
+  const dNo = firstQuery(query['d_no'])
+  const where = {
+    ...(dNo !== undefined && dNo !== '' ? { d_no: { operator: '=' as const, value: dNo } } : {}),
+    ...parseWhere(query['where']),
+  }
+
+  const buckets = parseBuckets(query['buckets'])
+  const rows = await db.chart(def.dataTable, {
+    where,
+    start,
+    end,
+    ...(buckets !== undefined ? { buckets } : {}),
+  })
+  res.status(200).json(successResponse(rows))
+}
+
 /**
  * 处理 GET /:source/table —— 返回字段映射
  */

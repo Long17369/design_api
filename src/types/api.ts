@@ -3,6 +3,8 @@ import {
   Data,
   ApiResponse,
   DataCount,
+  ChartPoint,
+  ChartQueryParams,
   DirectConfig,
   Direct,
   UpdateDirectParams,
@@ -96,6 +98,27 @@ export async function getTimeRange(
   })
   return fetchApi<{ minTime: string; maxTime: string }>(
     `${BASE_URL}/${resolveSource(source)}/time-range?${queryString}`,
+  )
+}
+
+/**
+ * 获取历史图表聚合数据（时间桶降采样，AVG）
+ *
+ * 与旧契约同名同参（旧路径 `/api/data/chart` 的 `data` 由 'data'→'sensor' 重定向兼容），
+ * 新增可选 `source`（sensor / behavior / error / control，默认 sensor）。
+ *
+ * @param params d_no / start / end / buckets / source
+ * @returns Promise<ChartPoint[]>（`c_time` + 各数据列桶内平均值，按时间升序）
+ */
+export const getChartData = (params: ChartQueryParams): Promise<ChartPoint[]> => {
+  const queryString = new URLSearchParams({
+    d_no: params.d_no,
+    start: params.start,
+    end: params.end,
+    buckets: String(params.buckets ?? 1000),
+  }).toString()
+  return fetchApi<ChartPoint[]>(
+    `${BASE_URL}/${resolveSource(params.source ?? 'sensor')}/chart?${queryString}`,
   )
 }
 
