@@ -11,6 +11,7 @@ const DEFAULT_TTL = 60_000
  *   `invalidate(table)`，因此缓存命中时不会读到已被应用改动的数据；
  * - TTL 只是兜底，防止漏掉某个失效点时长期脏读（默认 60s，可传 `ttl: 0` 关闭）；
  * - `tag` 一般直接用表名，一次失效即可覆盖该表的全部派生缓存；
+ * - **key 由使用它的模块自己定义，本模块不集中登记业务 key**（清单见 `docs/CACHE.md`）；
  * - 进程级单例（不参与模块 close），随进程存活。
  */
 export class CacheStore {
