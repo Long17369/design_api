@@ -45,6 +45,12 @@ declare module '@modules/autoControl' {
     pressureZero: number
     /** 压力过高阈值(kPa) */
     overpressureLimit: number
+    /** 过压冷却期时长(秒)：冷却期内禁止重新开泵；0 = 不加限时锁 */
+    overpressureDelay: number
+    /** 冷却期满是否自动解锁（false = 需手动复位） */
+    overpressureAutoRelease: boolean
+    /** 自动解锁后的行为：'hold' 保持关闭 / 'resume' 按锁定前快照恢复运行 */
+    overpressureOnRelease: 'hold' | 'resume'
     /** 瞬时流量归零阈值 */
     flowRateZero: number
     /** 水泵启动宽限期(秒)：仅水泵刚启动时生效 */
