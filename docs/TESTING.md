@@ -4,7 +4,7 @@
 
 | 命令                 | 作用                                                          |
 | -------------------- | ------------------------------------------------------------- |
-| `pnpm test`          | 运行 vitest 单测（`tests/**/*.test.ts`，9 文件 46 用例，<1s） |
+| `pnpm test`          | 运行 vitest 单测（`tests/**/*.test.ts`，套件规模见命令输出，<1s） |
 | `pnpm test:watch`    | vitest watch 模式                                             |
 | `pnpm type-check`    | `tsc --noEmit`（覆盖 `src` + `tests`）                        |
 | `pnpm exec eslint .` | 类型感知 lint（`tests/e2e/*.mjs` 关闭类型感知，`tmp/` 忽略）  |

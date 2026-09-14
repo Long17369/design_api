@@ -37,6 +37,11 @@
 - [ ] ③ 评估后再考虑「全库中间件 / 表级缓存策略配置」这类更重的方案（当前写穿透已覆盖应用内写入路径）
 - [x] 设备级配置覆盖：取值优先级 **设备 `direct` 值 > `direct_config.default_value` > 内置默认**（`buildAutoConfig` 逐帧合并设备值 → 前端改配置**立即生效**）；修复原先只读全局默认值导致「前端改配置对自动控制不生效」
 - [x] 离线告警 `sensor_offline`（已实现）：引擎内 **5s 轻量定时器**（`unref` 不阻塞退出）扫描最近上报时刻，超过 `sensor_offline_seconds`(60s，支持设备级覆盖) → 写 `error_msg(field3='offline')` + WS 告警（warning，只告警一次）；恢复上报推 `type='reset'`（前端清横幅），再次离线可再次告警；**不做**旧项目的「暂停自动控制」
+- [x] **告警改「仅状态切换时推送」**（2026-09-14）：引擎每帧执行命中的决策（不做去重）⇒ 堵塞期间**每帧**写 `error_msg` + 推 WS（实测同一次堵塞重复 4~6 条），`blocked` 锁也每帧重新 acquire（写库 + 推锁状态）
+  - 堵塞三判定（`pressure_zero` / `flow_unchanged` / `temp_anomaly`）：以 **`blocked` 锁为「已推送」标志**，无锁才带 `alarm`；仍每帧维持 `block` 决策（锁即状态，手动复位后可再次推送）
+  - 可自恢复的两类补**解除**推送（`type:'reset'` + `category:'release'`，前端清横幅）：`pump_idle_release`（流量恢复）、`reverse_temp_release`（温差恢复 / 停止加热）；缺测只静默重置
+  - 引擎 `blockDevice`：`blocked` 锁已存在时不再重复 acquire；手动复位补写 `error_msg(category='release', code='block_release')`
+  - **颜色/分类约定**：堵塞类 `error` 红 + `field3='block'`；解除类 `warning` 黄 + 独立 `field3='release'` + `type='reset'`（修「压力解锁被当堵塞染红」）
 - [x] 设备状态同步（已实现）：设备上报开关状态与 `direct` 指令值**连续 `device_sync_frames` 帧不一致** → 以**设备实际状态**为准回写（写 direct + 下发 + `source='device'` 通知 + `control_log(field1='device')` + `device_sync` 告警）；指令值一变化即重新计数（避免下发的控制被设备上报滞后同步回去）；**默认 0（关闭）**，可按设备启用
 - [x] 关泵连带关加热（两层防护，已实现）：① 引擎统一规则 —— 任何「关泵」动作若加热仍开，自动在其前面补一条「关加热」（按序跟踪，决策自身已关加热时不重复下发）；② 状态兜底 —— 水泵停止（**指令值或上报泵状态任一为「泵停」**）且加热仍开 → 立即关加热（不受启动宽限期影响，放在决策之后执行避免重复写库）
 - [x] 数据质量标记 `WsData.invalid`（已实现）：**阈值配置化**（`sensor_spike_temp`(10°C)/`sensor_spike_pressure`(20kPa)/`sensor_spike_flow`(100L/min)）+ **多帧累计防抖**（`sensor_spike_frames`，默认 0=关闭，连续 N 帧跳变才标记 invalid，恢复正常即清除）；缺测不算跳变；只在 WS `data` 上标记（前端曲线标注），不影响落库与控制
