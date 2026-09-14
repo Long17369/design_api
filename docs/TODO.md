@@ -33,11 +33,11 @@
 - [x] ② 迁移与写穿透失效：`Database.insert/update/delete` 成功后按表名 `invalidate`；`autoControl` 阈值缓存、`sensorModule` 的 `direct_config`/`sensor_data_mapper` 缓存（共 3 处本地 TTL）已迁入
 - [ ] ③ 评估后再考虑「全库中间件 / 表级缓存策略配置」这类更重的方案（当前写穿透已覆盖应用内写入路径）
 - [x] 设备级配置覆盖：取值优先级 **设备 `direct` 值 > `direct_config.default_value` > 内置默认**（`buildAutoConfig` 逐帧合并设备值 → 前端改配置**立即生效**）；修复原先只读全局默认值导致「前端改配置对自动控制不生效」
-- [ ] 离线告警 `sensor_offline`：轻量定时器（5s）扫描最后上报时间 → 超时告警、恢复清除；**不做**旧项目的「暂停自动控制」（本引擎由上报驱动，不会用旧数据决策）
+- [x] 离线告警 `sensor_offline`（已实现）：引擎内 **5s 轻量定时器**（`unref` 不阻塞退出）扫描最近上报时刻，超过 `sensor_offline_seconds`(60s，支持设备级覆盖) → 写 `error_msg(field3='offline')` + WS 告警（warning，只告警一次）；恢复上报推 `type='reset'`（前端清横幅），再次离线可再次告警；**不做**旧项目的「暂停自动控制」
 - [ ] 设备状态同步（`source='device'`）：设备上报值与 `direct` 目标**连续 N 帧不一致**才同步；触发时**写库 + WS 告警**（不用旧项目的漂移阈值表）
 - [x] 关泵连带关加热（两层防护，已实现）：① 引擎统一规则 —— 任何「关泵」动作若加热仍开，自动在其前面补一条「关加热」（按序跟踪，决策自身已关加热时不重复下发）；② 状态兜底 —— 水泵停止（**指令值或上报泵状态任一为「泵停」**）且加热仍开 → 立即关加热（不受启动宽限期影响，放在决策之后执行避免重复写库）
 - [ ] 数据质量标记 `WsData.invalid`：**阈值配置化** + 多帧累计 + 防抖（不写死固定值）
-- [ ] 告警类型区分：`AlarmDef` 增加 `type` 字段（组件自带），替代现在写死的 `error_msg.field3='block'`
+- [x] 告警类型区分：`AlarmDef` 增加 `type`（'alarm' | 'error' | 'reset'）与 `category`（写 `error_msg.field3`，默认 `'block'`）由组件自带，替代写死的 `error_msg.field3='block'`；既有组件不传新字段 → 行为不变
 
 ## 锁定通道与复位（`src/core/locks/`、`directModule`）
 
