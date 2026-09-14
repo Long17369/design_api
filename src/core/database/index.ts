@@ -16,6 +16,7 @@ import {
   sortTablesForCreate,
 } from './utils'
 import { bus } from '@core/bus'
+import { cache } from '@core/cache'
 import { Closable } from '@core/lifecycle'
 import { DataQueryParams, Where } from '@/types/types'
 import { TableInfoBuilded } from '.'
@@ -324,6 +325,8 @@ export class Database implements Closable {
     const placeholders = columns.map(() => '?').join(', ')
     const sql = `INSERT INTO ${quote(info.name)} (${columns.map((column) => quote(column)).join(', ')}) VALUES (${placeholders})`
     const [result] = await this.query(sql, values)
+    // 写穿透失效：该表的派生缓存（按表名打 tag）立即失效，避免读到旧数据
+    cache.invalidate(info.name)
     return result as WriteResult
   }
 
@@ -358,6 +361,7 @@ export class Database implements Closable {
     const { sql: whereSQL, params: whereParams } = buildWhereSQL(info, where)
     const sql = `UPDATE ${quote(info.name)} SET ${setSQL}${whereSQL}`
     const [result] = await this.query(sql, [...values, ...whereParams])
+    cache.invalidate(info.name)
     return result as WriteResult
   }
 
@@ -376,6 +380,7 @@ export class Database implements Closable {
     const { sql: whereSQL, params } = buildWhereSQL(info, where)
     const sql = `DELETE FROM ${quote(info.name)}${whereSQL}`
     const [result] = await this.query(sql, params)
+    cache.invalidate(info.name)
     return result as WriteResult
   }
 

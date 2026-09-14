@@ -1,4 +1,5 @@
 import { bus } from '@core/bus'
+import { cache } from '@core/cache'
 import { log } from '@core/logger'
 import { Closable } from '@core/lifecycle'
 import { Database } from '@core/database'
@@ -12,8 +13,8 @@ import { loadAutoConfig, pushHistory, sendAlarm, setControl } from './utils'
 
 const logger = log.getLogger('AutoControlModule')
 
-/** 阈值配置缓存有效期(ms) */
-const CONFIG_TTL = 60_000
+/** 阈值配置缓存 key（tag = direct_config，写库时自动失效） */
+const CONFIG_CACHE_KEY = 'autoControl:config'
 
 /** 设备历史帧最大数量（温度异常等跨帧判定用） */
 const MAX_HISTORY = 10
@@ -28,7 +29,6 @@ export class AutoControlModule implements Closable {
 
   /** 各设备运行状态 */
   private readonly devices = new Map<string, DeviceState>()
-  private configCache: { at: number; value: AutoConfig } | null = null
   /** 串行处理链，保证按时序处理 */
   private queue: Promise<void> = Promise.resolve()
 
@@ -57,11 +57,10 @@ export class AutoControlModule implements Closable {
     this.directModule = directModule
   }
 
-  /** 释放资源：统一注销所有事件订阅并清空缓存 */
+  /** 释放资源：统一注销所有事件订阅并清空设备状态 */
   public close(): void {
     this.unsubscribers.splice(0).forEach((unsubscribe) => unsubscribe())
     this.devices.clear()
-    this.configCache = null
     this.queue = Promise.resolve()
   }
 
@@ -223,12 +222,8 @@ export class AutoControlModule implements Closable {
     return state.pumpStartedAt !== null && now - state.pumpStartedAt < cfg.pumpStartGrace * 1000
   }
 
-  /** 读取阈值配置（带 TTL 缓存） */
-  private async loadConfig(db: Database): Promise<AutoConfig> {
-    const now = Date.now()
-    if (this.configCache && now - this.configCache.at < CONFIG_TTL) return this.configCache.value
-    const value = await loadAutoConfig(db)
-    this.configCache = { at: now, value }
-    return value
+  /** 读取阈值配置（@core/cache，tag=direct_config，写库后自动失效） */
+  private loadConfig(db: Database): Promise<AutoConfig> {
+    return cache.remember(CONFIG_CACHE_KEY, () => loadAutoConfig(db), { tag: 'direct_config' })
   }
 }

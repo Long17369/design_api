@@ -29,10 +29,9 @@
 - [x] 告警定义下沉到各组件（删除集中的 `alarmConfig.ts`）
 - [x] 阈值配置读取 `loadAutoConfig`（`direct_config.default_value`）+ `sensorTemp` 工具
 - [x] 水泵启动宽限期 `pump_start_grace`
-- [ ] 阈值配置即时生效（分三步，不引入旧项目的事件失效机制）：
-      ① 新增 `@core/cache`：KV + TTL + 按表 tag 失效，统一读取入口
-      ② 现有两处本地 TTL 迁入该缓存，并做**写穿透失效**（`directModule` 写配置时清对应 tag）
-      ③ 评估后再考虑「全库中间件 / 表级缓存策略配置」这类更重的方案
+- [x] ① 新增 `@core/cache`：KV + TTL + 按表 tag 失效（`remember` 读-加载-写一体），统一读取入口
+- [x] ② 迁移与写穿透失效：`Database.insert/update/delete` 成功后按表名 `invalidate`；`autoControl` 阈值缓存、`sensorModule` 的 `direct_config`/`sensor_data_mapper` 缓存（共 3 处本地 TTL）已迁入
+- [ ] ③ 评估后再考虑「全库中间件 / 表级缓存策略配置」这类更重的方案（当前写穿透已覆盖应用内写入路径）
 - [ ] 设备级配置覆盖：**实现「设备 `direct` 值 > `direct_config.default_value`」** —— 修复「前端改配置对自动控制不生效」（前端写的是设备级 `direct`，引擎只读了全局默认值）
 - [ ] 离线告警 `sensor_offline`：轻量定时器（5s）扫描最后上报时间 → 超时告警、恢复清除；**不做**旧项目的「暂停自动控制」（本引擎由上报驱动，不会用旧数据决策）
 - [ ] 设备状态同步（`source='device'`）：设备上报值与 `direct` 目标**连续 N 帧不一致**才同步；触发时**写库 + WS 告警**（不用旧项目的漂移阈值表）
