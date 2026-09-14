@@ -2,9 +2,9 @@
 
 ## 命令
 
-| 命令                 | 作用                                                          |
-| -------------------- | ------------------------------------------------------------- |
-| `pnpm test`          | 运行 vitest 单测（`tests/**/*.test.ts`，9 文件 46 用例，<1s） |
+| 命令                 | 作用                                                           |
+| -------------------- | -------------------------------------------------------------- |
+| `pnpm test`          | 运行 vitest 单测（`tests/**/*.test.ts`，9 文件 52 用例，<1s）  |
 | `pnpm test:watch`    | vitest watch 模式                                             |
 | `pnpm type-check`    | `tsc --noEmit`（覆盖 `src` + `tests`）                        |
 | `pnpm exec eslint .` | 类型感知 lint（`tests/e2e/*.mjs` 关闭类型感知，`tmp/` 忽略）  |
@@ -15,12 +15,14 @@
 | 文件                                   | 覆盖内容                                                                                                        |
 | -------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `tests/autoControl/components.test.ts` | 堵塞三判定（压力归零/流量不变/温度异常）、空转去抖、恒温上下限、流量目标、过压冷却期与锁、逆温差预警            |
-| `tests/autoControl/pidTemp.test.ts`    | PID：未启用/防干烧/缺测/占空比开关/积分限幅饱和                                                                 |
+| `tests/autoControl/pidTemp.test.ts`    | PID：未启用/防干烧/缺测/占空比开关/积分限幅饱和/抗积分饱和（升温段不污染稳定段）/时间量纲与 PWM 最小导通 |
 | `tests/autoControl/alarm.test.ts`      | `sendAlarm` 分类/类型/颜色透传、时间归一化（UTC 字面量）、堵塞补推组装                                          |
 | `tests/sensorModule/spike.test.ts`     | 跳变阈值边界、关闭字段、缺测不误判                                                                              |
 | `tests/core/cache.test.ts`             | KV/TTL/标签失效/`remember` 只加载一次                                                                           |
 | `tests/core/chart.test.ts`             | 桶步长边界（向上取整/最小 1s）、SQL 结构与参数顺序、客户端 URL 与别名                                           |
-| `tests/core/wsUrl.test.ts`             | WS 契约接口：`WS_PATH` 与后端路径一致、`connectWebSocket` 返回连接实例（含 `location` 拼地址/无 location 报错） |     | `tests/core/typesIsolation.test.ts` | 契约目录纯净性：`src/types/` 内只允许 `./` 引用，出现外部引用即失败 |     | `tests/directModule/configHierarchy.test.ts` | 配置层级门控（递归隐藏、` | `多值、父值回退`default_value`） |
+| `tests/core/wsUrl.test.ts`             | WS 契约接口：`WS_PATH` 与后端路径一致、`connectWebSocket` 返回连接实例（含 `location` 拼地址/无 location 报错） |
+| `tests/core/typesIsolation.test.ts`    | 契约目录纯净性：`src/types/` 内只允许 `./` 引用，出现外部引用即失败                                             |
+| `tests/directModule/configHierarchy.test.ts` | 配置层级门控（递归隐藏、`|` 多值、父值回退 `default_value`）                                             |
 
 约定：组件与锁通道是**进程级单例**，用例需在 `beforeEach` 清理（`clearState` / `releaseAll`）；vitest 已配置串行执行（`fileParallelism: false`）。
 
@@ -53,6 +55,7 @@ pnpm exec tsx tests/e2e/verify_seeds.ts               # seeds 等价性（只需
 | `ws_path.ts`                                                                                                    | WS 路径锁定 + 契约 `connectWebSocket(goal?)` 建连（其它路径 400；进程内临时端口） |
 | `lock_persist_a.mjs` / `lock_persist_b.mjs`                                                                     | 锁持久化：A 触发并落库 → B 重启后恢复与开泵拦截（两阶段）                         |
 | `verify_seeds.ts` / `print_configs.ts`                                                                          | seeds 等价性校验 / 打印指令配置列表（排查工具）                                   |
+| `pid_calib.mjs`                                                                                                 | PID 控温「稳在目标」标定/验收统计（**只读、不起服务**；读数占比/带宽/静态偏差/duty 分布） |
 
 注意：
 
@@ -68,3 +71,40 @@ pnpm exec tsx tests/e2e/verify_seeds.ts               # seeds 等价性（只需
 ```bash
 rm -f tmp/*.log tmp/*.json   # 只清产物；测试脚本已入库在 tests/e2e/
 ```
+
+## PID 控温精度：标定与验收（`tests/e2e/pid_calib.mjs`）
+
+**只读、不起服务**，直接读 MySQL 统计「稳在目标」的达成度，报告同时写入 `tmp/pid_calib_<时间戳>.md`：
+
+```bash
+node tests/e2e/pid_calib.mjs                  # 最近 30 分钟、全部设备
+node tests/e2e/pid_calib.mjs 14:40 15:00      # 指定当天窗口
+node tests/e2e/pid_calib.mjs 14:40 15:00 <d_no>
+```
+
+判定标准（**读数口径**；真值需独立温度计比对）：
+
+| 指标                                     | 达标                                            |
+| ---------------------------------------- | ----------------------------------------------- |
+| 读数恒为目标的占比                       | ≥ 99%                                           |
+| 读数带宽                                 | ≤ 1 个上报步长（现为 0.1 ℃）                    |
+| 加热占比                                 | 与理论平衡 duty 同量级（实测升温:散热 ≈ 7~9:1 ⇒ ≈ 13%） |
+
+标定步骤（偏差规律已由仿真 + 真机数据确认）：
+
+1. 先跑工具看**静态偏差（读数均值 − 目标）**：
+   - ≈ **负半个上报步长**（现为 −0.05）⇒ 控制器停在「读数 = 目标」区间的**下沿**（读数一旦等于目标就停止加热），
+     真值被钉在 `目标 − 半步`。补偿 = 把控制目标上调**半个步长**（+0.05）；真机实测偏差 −0.044，与理论一致。
+   - ≈ 0 ⇒ 已居中，无需补偿。
+   - ≈ **一个整步长**（+0.1）⇒ 补偿过量（跳档），改回半步。
+2. 补偿**必须配 `pid_kp` 降档**：仿真显示 `Kp=4` 时 +0.05 会**整步跳档**（真值 → `+0.056`、读数变 40.1），
+   而 `Kp=1` 时 δ∈[0.02, 0.06] 可单调微调、真值稳在 39.999（数据见 `docs/TODO.md` 的标定条目）。
+3. 改完**再跑一次工具复验**（对比改动前后的占比、带宽、加热占比）。
+
+边界（避免设定不可达的验收目标）：
+
+- **「完全不变」物理上不可达**：真值纹波下限 ≈ 0.02 ℃（PWM 开关 + 散热波动的极限）。
+- 要求**读数恒为 40.0** 时，需设备端把水温上报精度 **0.1 → 0.01 ℃**（仿真：真值 40.002 ± 0.05、偏差 > 0.05 占比 0%）。
+- 若真机温度计与日志读数**恒差一个固定量**（如日志 40.0、温度计 40.2），先查**探头校准与测点位置**（水温分层），
+  控制器只能把它读到的值稳到目标。
+

@@ -46,6 +46,7 @@
     - **建议（现场标定，零代码）**：`pid_kp` 4 → **1**、`pid_target` 40.0 → **40.05**（半步补偿）⇒ 真值稳在 40.00（均值 39.999）、95% 时间显示 40.0
     - **「完全不变」不可达**：真值纹波下限 ≈ **0.02 ℃**（PWM 开关 + 散热波动的物理极限）。要**读数恒为 40.0** 必须把设备端水温上报精度 **0.1 → 0.01 ℃**（仿真：真值 40.002 ± 0.05、偏差>0.05 占比 0%）
     - 待定：半步补偿写进 `pid_target` 会与配置页"目标温度"显示冲突 → 可选加配置项 `pid_target_offset`（默认 0，表内仍显示 40.0），等用户选
+    - 工具：`tests/e2e/pid_calib.mjs`（只读标定/验收统计：读数占比、带宽、静态偏差、duty 分布；流程与判定标准见 `docs/TESTING.md`）
   - 仍未处理（后续）：**参数需按「秒」重新整定**（Ki/Kd 量纲变更 + 实测升温:散热 ≈ 7~9:1，稳定段所需 duty 约 13%）；数据库 `pid_enabled` 仍为 0（PID 实际未启用）；`E2E_BLOCK` 遗留的设备/锁记录待清
 - [x] 组件状态自持重构：计时/激活态已从共享 `DeviceState` 收回组件内部（`flowUnchanged` 计时、`flowTarget` 已达目标标记），`DeviceState` 只留引擎级字段（`pumpOn`/`pumpStartedAt`/`blocked`/`history`）；引擎 `close()` 统一调组件 `clearState()`
 - [x] 组件 `history` 需求接口：`AutoComponent.historyLength?(ctx)`（可空实现，默认 1 帧），引擎取所有组件需求的最大值统一裁剪（`tempAnomaly` 声明 `temp1RiseCount + 1`）；`history` 仍共享
