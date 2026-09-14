@@ -4,7 +4,7 @@ import { Closable } from '@core/lifecycle'
 import { Database } from '@core/database'
 import { WsAlarm } from '@/types/types'
 import { WsClientConnected } from '@gateways/websocket'
-import { BlockedDeviceRow, BlockErrorRow } from '.'
+import { BlockErrorRow, BlockedLockRow } from '.'
 import { toBlockAlarm } from './utils'
 
 const logger = log.getLogger('AlarmModule')
@@ -17,7 +17,7 @@ const MAX_BLOCKED_DEVICES = '100'
  * 负责“堵塞预警”的查询与补推——前端断开重连后，为当前处于堵塞状态的设备恢复实时预警横幅。
  *
  * 数据来源：
- * - 堵塞状态：direct 表 config_id='blocked' 且 value='1'（持久标记，手动复位前保持）
+ * - 堵塞状态：device_locks 表中 type='blocked' 的设备（锁通道持久化记录，手动复位前保持）
  * - 预警文案：error_msg 中该设备最新一条 field3='block' 记录（故障历史永久保留）
  *
  * 触发时机：WebSocket 客户端连接（总线事件 WS_CLIENT_CONNECTED，携带该连接的 goal），
@@ -63,15 +63,14 @@ export class AlarmModule implements Closable {
   }
 
   /**
-   * 查询所有处于堵塞状态的设备编号
+   * 查询所有处于堵塞锁定状态的设备编号（源：锁通道持久化表 device_locks）
    */
   public async listBlockedDevices(): Promise<string[]> {
-    const rows = await this.db().executeQuery<BlockedDeviceRow>({
-      table: 'direct',
+    const rows = await this.db().executeQuery<BlockedLockRow>({
+      table: 'device_locks',
       columns: ['d_no'],
       where: {
-        config_id: { value: 'blocked', operator: '=' },
-        value: { value: '1', operator: '=' },
+        type: { value: 'blocked', operator: '=' },
       },
       orderBy: 'id',
       order: 'ASC',

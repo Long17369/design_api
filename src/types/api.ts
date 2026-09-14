@@ -155,7 +155,7 @@ export const sendControlCommand = (
 }
 
 /**
- * 手动复位设备堵塞状态（清除持久化 blocked 标记 + 释放保护锁 + 广播 reset 事件）
+ * 手动复位设备堵塞状态（释放保护锁并清理锁持久化记录 + 按快照恢复运行 + 广播 reset 事件）
  * @param d_no 设备编号
  */
 export const resetDeviceBlock = (d_no: string) => {

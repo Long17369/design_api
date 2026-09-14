@@ -33,7 +33,7 @@ declare module '@modules/directModule' {
     d_no: string
     /** 变更来源：手动(HTTP/复位) / 自动控制 */
     source?: 'manual' | 'auto' | 'config'
-    /** 是否推送 direct 通知（默认 true；内部标记如 blocked 传 false） */
+    /** 是否推送 direct 通知（默认 true；仅需落库/下发而不通知前端时传 false） */
     notify?: boolean
   }
   /** direct_config 表行（含保留字 order 列，查询时需加反引号） */

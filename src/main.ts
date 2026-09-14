@@ -3,7 +3,7 @@ import { Config } from '@core/config'
 import { Database } from '@core/database'
 import { log } from '@core/logger'
 import { MqttGateway, HttpServer, WebSocketServer } from '@gateways'
-import { AlarmModule, AutoControlModule, DirectModule, SensorModule } from '@modules'
+import { AlarmModule, AutoControlModule, DirectModule, LockModule, SensorModule } from '@modules'
 
 const logger = log.getLogger('Main')
 
@@ -30,6 +30,9 @@ async function main() {
   })
 
   // 2. 注册所有模块（构造时订阅 bus 'shutdown' 事件）
+  // 锁定模块先注册：尽早恢复持久化锁，避免重启后保护锁尚未生效
+  const lockModule = new LockModule()
+  lockModule.setDatabase(database)
   const sensorModule = new SensorModule()
   sensorModule.setDatabase(database)
   const autoControl = new AutoControlModule()

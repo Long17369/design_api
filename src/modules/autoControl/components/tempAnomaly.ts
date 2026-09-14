@@ -11,7 +11,7 @@ const ALARM: AlarmDef = {
 /**
  * 堵塞判定④：温度异常 —— 升温1 连续上升 temp1_rise_count 次，
  * 同时升温2 在这些帧内保持稳定（极差 ≤ temp2_stable_delta）。
- * 命中即执行堵塞保护（关加热 + 关水泵 + 持久化 direct.blocked 标记 + 加 blocked 锁 + 预警）。
+ * 命中即执行堵塞保护（关加热 + 关水泵 + 加 blocked 锁（持久化与推送由 LockModule 负责） + 预警）。
  * 相关配置：temp1_rise_count / temp2_stable_delta
  */
 export const tempAnomalyComponent: AutoComponent = {

@@ -44,8 +44,8 @@
 - [x] 统一锁定通道 `@core/locks`：`acquire`/`releaseAll`/`isDenied`/快照（`getSnapshot`/`clearSnapshot`）
 - [x] `DirectModule.setValue` 按锁拦截：禁止**开启水泵**，关泵不受限
 - [x] 手动复位 `POST /api/control/reset`：释放锁 → 按快照恢复 heat/water → 写 `control_log` → 广播 `type:'reset'`
-- [ ] 锁通道自带持久化（方案 A）：新建 `device_locks` 表（`d_no`/`type`/`reason`/`expires_at`/`snapshot`），`lockManager.acquire`/`release` 同步落库，启动时加载未过期锁；**堵塞标记彻底移出 `direct`/`direct_config`**（补推与重启恢复都改读锁表）
-- [ ] WS 推送锁状态：锁 `acquire`/`release` 时广播（如 `event:'lock'`，含 `d_no`/`active`/`type`/`reason`），前端据此显示「设备被锁定」，替代原先靠 `blocked` 配置项感知
+- [x] 锁通道自带持久化（方案 A）：新增 `device_locks` 表（`d_no`/`type`/`reason`/`deny`/`snapshot`/`expires_at`/`c_time`）+ `LockModule`（订阅 `LOCK_CHANGED` 落库、启动加载未过期锁、清理过期行）；**堵塞标记彻底移出 `direct`/`direct_config`**
+- [x] WS 推送锁状态：锁变化广播 `event:'lock'`（`WsLock`：`locked`/`active`/`type`/`reason`/`expiresAt`），并补一条 `direct`（`config_id:'lock'`）兼容旧前端；前端据此显示「设备被锁定」
 
 > 约定：组件需要保护性锁时**直接调用 `lockManager`**（锁上带快照），引擎不参与锁语义 ——
 > 不引入旧项目的「决策带 `lock`/`unlock`、引擎统一执行」那套重机制。
@@ -58,7 +58,7 @@
 - [x] 手动控制 `POST /api/control`：`auto=1` 时拒绝手动开/关；写 direct + 下发 + WS 通知 + `control_log(manual)`
 - [x] 手动复位：`POST /api/control/reset`
 - [x] 前端契约：`api.ts::sendControlCommand` / `resetDeviceBlock`
-- [ ] `direct_config.blocked` 内部标记外泄给 `GET /api/direct/config`：随「锁通道自带持久化」一并解决（该配置行迁出后删除，接口无需再加过滤名单）
+- [x] `direct_config.blocked` 内部标记外泄给 `GET /api/direct/config`：**已解决** —— 配置行删除（列表回到 18 项），堵塞标记改由 `device_locks` 承担
 - [x] `ErrorCode.NOT_IMPLEMENTED`：**保留**（对外错误码联合类型，先不收缩）
 - [x] 旧前端接口差异：已整理成 `docs/API-CHANGES.md`（接口对照 + WS 差异 + 前端适配清单），**暂不改后端**
 
@@ -73,8 +73,8 @@
 - [x] MQTT 入站：连接/重连后订阅已注册主题（含启动日志）；未知主题消息 warn 忽略
 - [x] 传感器模块：`SENSOR_DATA_RAW` → 派生指标（累计流量本地累加 / `heat_rate` / `avg_flow`）→ 落库 `sensor_data` → 再分发 `SENSOR_DATA`
 - [x] WS `data` 推送（实时数据）、WS `direct` 通知（成功/失败）、WS `alarm`（告警 + 复位广播）
-- [x] 预警补推：WS 连接时按 `direct.blocked` + `error_msg(field3='block')` 定向补推（id 复用 `alarm_${d_no}_${c_time}` 供前端去重）
-- [ ] 预警补推数据源改造：待锁通道持久化落地后改为按 `device_locks` 查询（不再依赖 `direct.blocked`）
+- [x] 预警补推：WS 连接时按 `device_locks`（type='blocked'）+ `error_msg(field3='block')` 定向补推（id 复用 `alarm_${d_no}_${c_time}` 供前端去重）
+- [x] 预警补推数据源改造：已改为按 `device_locks` 查询（不再依赖 `direct.blocked`）
 - [x] WS 定向推送 `goal` 与重连复用、`WS_CLIENT_CONNECTED` / `WS_MESSAGE_IN` 事件
 - [x] `WS_MESSAGE_IN`：保持预留（前端不发 WS 上行，暂无需求）
 - [x] 实时数据推送节流/合并：**不做**（按帧广播已足够，后续确有压力再加）

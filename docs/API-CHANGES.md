@@ -33,6 +33,9 @@
 - `data`：每帧上报的实时数据（字段同 `WsData`：`d_no/timestamp/wen_du1/wen_du2/jia_re/shui_beng/liu_liang1/liu_liang2/pressure/heat_rate/avg_flow`）
 - `alarm`：`id` 形如 `alarm_${d_no}_${c_time}`（**用于重连去重**，补推与首次推送 id 相同）；`type='reset'` 表示复位事件（前端应清除该设备横幅）
 - `direct`：指令变更通知（`{d_no, config_id, value?, success, source?, error?}`）—— `success=false` 时前端可弹错误提示
+- `lock`：保护锁状态变更（`{d_no, locked, active[], type?, reason?, expiresAt?, timestamp}`）——
+  `active` 为当前仍有效的锁类型（`blocked`/`overpressure`/`pump_idle`/`leak`，空数组=已解锁）；
+  **同时**会补发一条 `direct`（`config_id='lock'`，`value='1'|'0'`），旧前端不改也能感知锁状态
 - 定向：服务端可按连接推送（`goal`），前端无需处理
 
 ## 前端适配清单
@@ -42,3 +45,14 @@
 3. 移除 `/api/device` 相关调用（设备管理）
 4. 控制页：`sendControlCommand` 响应/参数不变；失败时展示 `error.message`
 5. 数据页：`getDataMapper('data')`、`getData('data', ...)` 可保留（客户端别名），也可统一改为 `'sensor'`
+6. 可选：接入新 `lock` 事件做「设备已锁定」提示（不改也能靠 `direct` 里的 `config_id='lock'` 兼容）
+
+## 升级须知（后端侧变更，部署/换库时执行）
+
+- **锁持久化新表**：`device_locks`（由 Database 自动建表，无需手工建）
+- **删除历史遗留的堵塞标记配置行**（`direct_config.blocked` 已废弃，若不删会重新出现在 `/api/direct/config`）：
+  ```sql
+  DELETE FROM direct WHERE config_id = 'blocked';
+  DELETE FROM direct_config WHERE code = 'blocked';
+  ```
+  执行后配置列表应为 **18** 项（原 19 项含内部标记）。堵塞状态改由 `device_locks` 保存，重启后自动恢复，手动复位时清除。

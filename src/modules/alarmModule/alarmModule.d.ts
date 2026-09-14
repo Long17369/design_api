@@ -3,8 +3,8 @@ import { AlarmModule } from '.'
 declare module '@modules/alarmModule' {
   AlarmModule
 
-  /** direct 表中的堵塞标记行（config_id='blocked' 且 value='1'） */
-  interface BlockedDeviceRow {
+  /** device_locks 表中的堵塞锁行（type='blocked'） */
+  interface BlockedLockRow {
     /** 设备编号 */
     d_no: string
   }

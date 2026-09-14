@@ -11,7 +11,7 @@ const ALARM: AlarmDef = {
 /**
  * 堵塞判定③：累计流量不变 —— 累计流量连续 flow_unchanged_seconds 秒无变化
  * （累计流量为 0/无效时不计时，避免设备未开始计量就误判）。
- * 命中即执行堵塞保护（关加热 + 关水泵 + 持久化 direct.blocked 标记 + 加 blocked 锁 + 预警）。
+ * 命中即执行堵塞保护（关加热 + 关水泵 + 加 blocked 锁（持久化与推送由 LockModule 负责） + 预警）。
  * 相关配置：flow_unchanged_seconds（累计流量不变持续秒数）
  */
 export const flowUnchangedComponent: AutoComponent = {

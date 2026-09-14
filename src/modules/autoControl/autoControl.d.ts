@@ -33,8 +33,8 @@ declare module '@modules/autoControl' {
     /** 命中后是否终止后续组件 */
     stop?: boolean
     /**
-     * 是否判定为「堵塞」：命中即持久化 direct.blocked='1' 并加 blocked 锁
-     * （锁上记录锁定前 heat/water 快照，供手动复位恢复）；数据恢复不自动解除。
+     * 是否判定为「堵塞」：命中即加 blocked 锁（禁止开启水泵，锁上带锁定前快照）。
+     * 锁的持久化与 WS 推送由 LockModule 统一处理；数据恢复不自动解除。
      */
     block?: boolean
   }
@@ -75,7 +75,7 @@ declare module '@modules/autoControl' {
     pumpOn: boolean
     /** 水泵本次启动时刻(ms) */
     pumpStartedAt: number | null
-    /** 是否处于堵塞状态（来自 direct.blocked，持久记忆，手动复位才解除） */
+    /** 是否处于堵塞状态（锁通道判定，持久化在 device_locks，手动复位才解除） */
     blocked: boolean
     /** 最近上报帧（最新在后，供温度异常等跨帧判定） */
     history: WsData[]
