@@ -33,6 +33,13 @@ const CFG: AutoConfig = {
   reverseTempSeconds: 5,
   flowTargetEnabled: true,
   totalFlowTarget: 100,
+  pidEnabled: false,
+  pidTarget: 30,
+  pidKp: 4,
+  pidKi: 0.02,
+  pidKd: 0.5,
+  pidCycle: 60,
+  pidSensor: 2,
 }
 
 const newState = (): DeviceState => ({
