@@ -18,6 +18,10 @@ export const tempAnomalyComponent: AutoComponent = {
   id: 'temp_anomaly',
   name: '温度异常（堵塞保护）',
   priority: 16,
+  /** 判定需要「连续上升 N 次」的历史：N + 1 帧 */
+  historyLength(ctx: AutoCtx): number {
+    return ctx.cfg.temp1RiseCount + 1
+  },
   evaluate(ctx: AutoCtx): AutoDecision | null {
     if (!isTempAnomaly(ctx.state, ctx.cfg)) return null
     return {

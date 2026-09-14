@@ -16,9 +16,6 @@ const logger = log.getLogger('AutoControlModule')
 /** 阈值配置默认值缓存 key（tag = direct_config，写库时自动失效） */
 const CONFIG_DEFAULTS_KEY = 'autoControl:configDefaults'
 
-/** 设备历史帧最大数量（温度异常等跨帧判定用） */
-const MAX_HISTORY = 10
-
 /**
  * 自动控制模块：
  * 订阅 SENSOR_DATA → 读设备 auto 开关 → 按优先级跑组件 → 执行决策（控制/告警/落库）。
@@ -57,10 +54,11 @@ export class AutoControlModule implements Closable {
     this.directModule = directModule
   }
 
-  /** 释放资源：统一注销所有事件订阅并清空设备状态 */
+  /** 释放资源：统一注销所有事件订阅、清空设备状态与组件内部状态 */
   public close(): void {
     this.unsubscribers.splice(0).forEach((unsubscribe) => unsubscribe())
     this.devices.clear()
+    for (const comp of autoComponents) comp.clearState?.()
     this.queue = Promise.resolve()
   }
 
@@ -100,7 +98,6 @@ export class AutoControlModule implements Closable {
     const cfg = await this.loadConfig(db, values)
     const now = Date.now()
     this.trackPump(state, data, now)
-    pushHistory(state.history, data, MAX_HISTORY)
 
     const ctx: AutoCtx = {
       d_no: dNo,
@@ -111,6 +108,8 @@ export class AutoControlModule implements Closable {
       inPumpGrace: this.inPumpGrace(state, cfg, now),
       values,
     }
+    // 历史帧长度由组件声明（取所有组件需求的最大值），组件无需自行保留历史
+    pushHistory(state.history, data, this.resolveHistoryLength(ctx))
 
     if (ctx.inPumpGrace) {
       logger.debug(`水泵刚启动，宽限期内跳过判定: ${dNo}`)
@@ -236,13 +235,15 @@ export class AutoControlModule implements Closable {
         pumpStartedAt: null,
         blocked: false,
         history: [],
-        lastTotalFlow: null,
-        flowUnchangedSince: null,
-        flowTargetReached: false,
       }
       this.devices.set(dNo, state)
     }
     return state
+  }
+
+  /** 组件声明的历史帧需求 → 统一裁剪长度（至少 1 帧） */
+  private resolveHistoryLength(ctx: AutoCtx): number {
+    return autoComponents.reduce((max, comp) => Math.max(max, comp.historyLength?.(ctx) ?? 1), 1)
   }
 
   /** 从上报的水泵状态(shui_beng)检测 0→1，记录启动时刻 */

@@ -69,7 +69,7 @@ declare module '@modules/autoControl' {
     totalFlowTarget: number
   }
 
-  /** 单设备运行状态 */
+  /** 单设备运行状态（仅引擎级状态；组件私有计时/激活态由各组件自持） */
   interface DeviceState {
     /** 水泵是否运行中（来自上报 shui_beng） */
     pumpOn: boolean
@@ -77,14 +77,8 @@ declare module '@modules/autoControl' {
     pumpStartedAt: number | null
     /** 是否处于堵塞状态（锁通道判定，持久化在 device_locks，手动复位才解除） */
     blocked: boolean
-    /** 最近上报帧（最新在后，供温度异常等跨帧判定） */
+    /** 最近上报帧（最新在后，供温度异常等跨帧判定；长度由组件声明的需求决定） */
     history: WsData[]
-    /** 上一帧累计流量（累计流量不变判定用） */
-    lastTotalFlow: number | null
-    /** 累计流量开始不变的时刻(ms)，恢复变化时置 null */
-    flowUnchangedSince: number | null
-    /** 是否已达成累计流量目标（跨越目标那一刻动作一次；低于目标时解除） */
-    flowTargetReached: boolean
   }
 
   /** 组件评估上下文 */
@@ -116,6 +110,16 @@ declare module '@modules/autoControl' {
     /** 中文名（日志用） */
     name: string
     priority: number
+    /**
+     * 声明组件需要的上报历史帧数（默认为 1）。
+     * 引擎取所有组件需求的最大值统一裁剪 `state.history`，组件无需自行保留历史。
+     */
+    historyLength?(ctx: AutoCtx): number
+    /**
+     * 清空组件内部状态（d_no 省略表示全部清空）。
+     * 组件状态由组件自持（如计时器/激活标记），引擎 close 时统一调用。
+     */
+    clearState?(d_no?: string): void
     evaluate(ctx: AutoCtx): AutoDecision | null
   }
 }
