@@ -1,5 +1,6 @@
 import { DatabaseConfig } from '.'
 import { ChartQueryParams } from '.'
+import { registerConfigSection } from '@core/config'
 import { log } from '@core/logger'
 import mysql from 'mysql2/promise'
 import tables, { tableTools } from './tables'
@@ -37,6 +38,8 @@ export class Database implements Closable {
 
   constructor() {
     this.tables = new Map()
+    // 声明本组件消费的配置 section（谁消费谁注册；热更新按注册表分派，由组件自行应用）
+    registerConfigSection({ name: 'database', owner: 'Database' })
     this.unsubscribers.push(
       bus.onEvent('shutdown', () => {
         this.close()

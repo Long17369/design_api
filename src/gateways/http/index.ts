@@ -1,6 +1,7 @@
 import http from 'http'
 import express, { Request, Response } from 'express'
 import { bus } from '@core/bus'
+import { registerConfigSection } from '@core/config'
 import { log } from '@core/logger'
 import { Database } from '@core/database'
 import { DirectModuleError, DirectModule } from '@modules/directModule'
@@ -39,6 +40,9 @@ export class HttpServer implements Closable {
     // 初始化 HTTP 服务器
     this.app = express()
     this.init()
+    // 声明本组件消费的配置 section（谁消费谁注册）：port 由 HTTP 服务消费（Server 据此 listen），
+    // 且**不可热更**（监听 socket 需重建），只能走整体 restart()
+    registerConfigSection({ name: 'port', owner: 'HttpServer' })
     this.unsubscribers.push(
       bus.onEvent('shutdown', () => {
         this.close()
