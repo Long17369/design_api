@@ -338,6 +338,10 @@ describe('过压保护（锁即状态 + 冷却期）', () => {
       { target: 'water', value: '1' },
     ])
     expect(released?.alarm?.code).toBe('overpressure_release')
+    // 解除类：独立分类 + reset（否则 field3 默认 'block' 会被当堵塞补推/染红）
+    expect(released?.alarm?.category).toBe('release')
+    expect(released?.alarm?.type).toBe('reset')
+    expect(released?.alarm?.level).toBe('warning')
     expect(lockManager.isDenied(dNo, 'water')).toBe(false)
   })
 })

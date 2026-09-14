@@ -9,11 +9,14 @@ const ALARM: AlarmDef = {
   message: '压力过高：已自动停泵并关闭加热',
 }
 
-/** 冷却期满（压力已回落）解除保护告警 */
+/** 冷却期满（压力已回落）解除保护告警 —— 解除类：独立分类 + reset（前端清横幅），
+ *  否则 `error_msg.field3` 默认写 'block' 会被当堵塞预警补推/染红 */
 const RELEASE_ALARM: AlarmDef = {
   code: 'overpressure_release',
   level: 'warning',
   message: '压力已回落：解除过压保护',
+  type: 'reset',
+  category: 'release',
 }
 
 /**
