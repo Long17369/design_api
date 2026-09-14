@@ -16,7 +16,7 @@ export default [
         ecmaVersion: 'latest',
         sourceType: 'module',
         projectService: {
-          allowDefaultProject: ['*.config.ts'], // 允许根目录的 .config.ts 文件
+          allowDefaultProject: ['*.config.ts'], // 根目录的 .config.ts 文件
         },
       },
     },
@@ -35,5 +35,6 @@ export default [
     },
   },
   eslintConfigPrettier,
-  globalIgnores(['**/dist/**', '**/dist-ssr/**', '**/coverage/**']),
+  // tmp/ 为本地临时脚本与 E2E（已 gitignore，不在任何 tsconfig project 内），不参与 lint
+  globalIgnores(['**/dist/**', '**/dist-ssr/**', '**/coverage/**', 'tmp/**']),
 ]
