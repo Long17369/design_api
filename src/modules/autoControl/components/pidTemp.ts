@@ -26,6 +26,13 @@ const INTEGRAL_OUTPUT_LIMIT = 0.2
 const DUTY_MIN = 0
 const DUTY_MAX = 1
 
+/**
+ * 时间步长上下限（**秒**）：防丢帧 / 时钟抖动把微分与积分放大。
+ * 帧间隔约 1s；下限 0.2s 防高频重算，上限 10s 防丢帧后微分爆炸。
+ */
+const DT_MIN_SEC = 0.2
+const DT_MAX_SEC = 10
+
 function stateOf(dNo: string): PidState {
   let state = states.get(dNo)
   if (!state) {
@@ -48,7 +55,11 @@ function reset(state: PidState): void {
  * PID 控温（完整 PID + PWM 开关加热）：
  *
  * - 误差 = `pid_target` − 检测温度（检测传感器由 `pid_sensor` 指定：1=升温1、2=升温2）
- * - 输出占空比 = Kp·e + Ki·∫e·dt(分) + Kd·de/dt(分)，限幅 [0, 1]
+ * - 输出占空比 = Kp·e + Ki·∫e·dt(**秒**) + Kd·de/dt(**秒**)，限幅 [0, 1]
+ *   ⚠️ 时间量纲是**秒**（2026-09-14 修正）：此前 `dt` 用分钟、而 Ki/Kd 是按秒给的量级，
+ *   Kd=0.5 实际被放大 60 倍 —— 温度 0.1 °C 的抖动就能把 duty 顶到 0/100%，
+ *   并且“温度一下跌就把加热打满”（加热 7~9 倍于散热）。配参数按**每秒**理解：
+ *   如 Kd=0.5 表示每（°C/s）偏差贡献 50% 占空比。
  * - **抗积分饱和**（修「升温段污染稳定段」）：
  *   ① 输出已被比例/微分同向推满时**停止积分**（条件积分）；
  *   ② 目标变化、以及**过冲**（误差由正转负）时**清积分**；
@@ -95,9 +106,13 @@ export const pidTempComponent: AutoComponent = {
     }
 
     const error = cfg.pidTarget - measured
-    const dtMin = state.lastAt === null ? 0 : (now - state.lastAt) / 60000
+    // 时间步长取秒并限幅（防丢帧 / 时钟抖动放大微分与积分）
+    const dtSec =
+      state.lastAt === null
+        ? 0
+        : Math.min(DT_MAX_SEC, Math.max(DT_MIN_SEC, (now - state.lastAt) / 1000))
     const derivative =
-      state.lastError === null || dtMin <= 0 ? 0 : (error - state.lastError) / dtMin
+      state.lastError === null || dtSec <= 0 ? 0 : (error - state.lastError) / dtSec
 
     const p = cfg.pidKp * error
     const d = cfg.pidKd * derivative
@@ -106,7 +121,7 @@ export const pidTempComponent: AutoComponent = {
     const saturatingHigh = p + d >= DUTY_MAX && error > 0
     const saturatingLow = p + d <= DUTY_MIN && error < 0
     if (!saturatingHigh && !saturatingLow) {
-      state.integral += error * dtMin
+      state.integral += error * dtSec
       if (cfg.pidKi > 0) {
         const limit = INTEGRAL_OUTPUT_LIMIT / cfg.pidKi
         state.integral = Math.max(-limit, Math.min(limit, state.integral))

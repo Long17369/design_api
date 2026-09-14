@@ -161,6 +161,19 @@ describe('PID 控温（PWM）', () => {
     expect(off?.controls).toEqual([{ target: 'heat', value: '0' }])
   })
 
+  it('温度缓降（−0.1 °C/帧）时微分项不再把输出打满（dt 改秒的回归）', () => {
+    const cfg = { ...CFG, pidTarget: 40, pidKp: 4, pidKi: 0.02, pidKd: 0.5, pidCycle: 10 }
+    let t = 4_400_000
+    pidTempComponent.evaluate(ctx('40.3', t, { heat: '0', water: '1' }, cfg))
+    t += 1000
+    pidTempComponent.evaluate(ctx('40.2', t, { heat: '0', water: '1' }, cfg))
+    t += 1000
+    // 到 40.1：误差 −0.1、微分项 = 0.5 × (+0.1 °C / 1 s) = +0.05 → duty 仍为 0 → 必须保持关
+    // （dt 用分钟时：0.1/0.0167 = 6 → Kd·de = +3 → duty 打满 100%，温度反而被加热顶回去）
+    const decision = pidTempComponent.evaluate(ctx('40.1', t, { heat: '1', water: '1' }, cfg))
+    expect(decision?.controls).toEqual([{ target: 'heat', value: '0' }])
+  })
+
   it('目标变化时丢弃旧积分（换目标不带着上一段残留）', () => {
     // 第一段：目标 30、实测 40 → 误差 −10（持续输出 0，积分不会被积起来）
     let t = 4_300_000
