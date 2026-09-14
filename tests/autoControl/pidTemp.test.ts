@@ -12,6 +12,7 @@ const CFG: AutoConfig = {
   flowRateZero: 0.01,
   pumpIdleSeconds: 60,
   pumpStartGrace: 10,
+  flowUnchangedEnabled: true,
   flowUnchangedSeconds: 15,
   sensorOfflineSeconds: 60,
   deviceSyncFrames: 0,

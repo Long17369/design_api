@@ -105,3 +105,19 @@
   无 `ref_code` → 恒可见；父不可见 → 子不可见（**递归**）；
   父当前值取「设备 `direct` 值 → 父 `default_value` → 空」，为空则不可见；
   `ref_value` 为空 → 父值非空即显示，否则按 `|` 分隔精确匹配（可多值，如 `0|2`）。
+
+### 2026-09-14：累计流量不变（堵塞）判定 —— 新增开关 + 泵状态前置
+
+- **新增开关 `flow_unchanged_enabled`**（默认 **开**，保持既有行为）；原挂在 `auto` 下的
+  `flow_unchanged_seconds` 改挂到该开关下 —— 开关关闭时，配置页不再显示判定秒数，且该规则不参与判定。
+- 该判定同时要求「**水泵已稳定运行 ≥ `pump_start_grace` 秒**」：停泵后累计流量本就不会变化，
+  原先会被误判为堵塞（实测停机 ~1 分钟即误报并加 `blocked` 锁）。
+
+```sql
+-- 既有库：把判定秒数改挂到新开关下（新开关行由 seeds 在服务启动时自动补）
+UPDATE direct_config SET ref_code='flow_unchanged_enabled', ref_value='1'
+  WHERE code = 'flow_unchanged_seconds';
+```
+
+自检：`pnpm exec tsx tests/e2e/verify_seeds.ts`。若不先启动一次服务（补新行），会看到
+`direct_config 缺少行 code=flow_unchanged_enabled` 与上述 `ref_code` 差异两条。

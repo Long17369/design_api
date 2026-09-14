@@ -50,6 +50,7 @@ export function buildAutoConfig(
     flowRateZero: numOr('flow_rate_zero', 0.01),
     pumpIdleSeconds: numOr('pump_idle_seconds', 60),
     pumpStartGrace: numOr('pump_start_grace', 10),
+    flowUnchangedEnabled: pick('flow_unchanged_enabled') === '1',
     flowUnchangedSeconds: numOr('flow_unchanged_seconds', 15),
     sensorOfflineSeconds: numOr('sensor_offline_seconds', 60),
     deviceSyncFrames: numOr('device_sync_frames', 0),
