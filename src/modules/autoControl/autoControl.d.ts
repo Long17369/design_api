@@ -67,6 +67,8 @@ declare module '@modules/autoControl' {
     pumpIdleSeconds: number
     /** 水泵启动宽限期(秒)：仅水泵刚启动时生效 */
     pumpStartGrace: number
+    /** 累计流量不变（堵塞）判定开关：关闭则该规则不参与判定 */
+    flowUnchangedEnabled: boolean
     /** 累计流量不变持续秒数（超过视为堵塞） */
     flowUnchangedSeconds: number
     /** 设备离线判定秒数：超过该时长未上报即告警（5s 定时器扫描）；0 = 关闭该告警 */

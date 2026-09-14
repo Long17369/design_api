@@ -15,6 +15,13 @@
 ## 自动控制 · 保护组件（`src/modules/autoControl/components/`）
 
 - [x] 堵塞保护：打散为 4 个独立判定 —— `pressureZero`(10) / `flowZero`(12) / `flowUnchanged`(14) / `tempAnomaly`(16)，命中即 `heat=0+water=0` + 持久化 `blocked` + 加锁 + 告警
+  - **2026-09-14 修「停泵被误判堵塞」**：`flowUnchanged`（累计流量不变）原先**不看水泵状态**，
+    而停泵后累计流量本就不会变化 —— 真实记录：15:55:09 停泵 → 累计值冻结在 **791.08**
+    （泵关期间 1072/1085 帧完全不变）→ **15:56:29 误报「水管堵塞：累计流量无变化」**（并上 `blocked` 锁）。
+    现加两道前置：① 规则开关 **`flow_unchanged_enabled`**（默认开，新增配置项，配置页可关）；
+    ② **水泵已稳定运行 ≥ `pump_start_grace` 秒**（复用该配置：泵停即清计时 ⇒ 不再误报；泵刚启动的
+    宽限期内累计值可能还没开始增长，也不判定）⇒ 重新开泵后需重新累计满 `flow_unchanged_seconds`
+  - 同类风险已核查：`pressureZero` 无泵状态前置，但实测停机期间压力为 **0.5~1.3**（不归零）⇒ 现状不会误报，暂不改
 - [x] 恒温保护 `tempLimit`(80)：超 `temp_max` 关加热；低于 `temp_min` 且水泵运行中才开加热（防干烧）；上限优先；幂等
 - [x] 累计流量目标 `flowTarget`(70)：跨越 `total_flow_target` 关泵一次，可随累计流量回落/调大目标重新触发
 - [x] `overpressure` 冷却期（已实现）：超压 → 关加热关泵 + 加 `overpressure` 锁（**锁即状态**，冷却期 = 锁的 `expiresAt`）；期满压力仍高 → **顺延**（保留原快照）；压力回落 → 解锁，行为按配置：`overpressure_delay`(20s) / `overpressure_auto_release`(1) / `overpressure_on_release`(hold|resume，默认 hold)；`delay=0` 表示不限时（只等压力回落）

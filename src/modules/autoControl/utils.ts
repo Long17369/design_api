@@ -41,6 +41,11 @@ export function buildAutoConfig(
   // 空字符串视为「未设置」，回退到下一优先级
   const pick = (code: string): string | null => (overrides?.get(code) || defaults.get(code)) ?? null
   const numOr = (code: string, def: number) => toNum(pick(code)) ?? def
+  /** 开关：行缺失（或为空）时回退到 def，避免因未迁移/未 seed 而意外失效 */
+  const boolOr = (code: string, def: boolean) => {
+    const v = pick(code)
+    return v === null ? def : v === '1'
+  }
   return {
     pressureZero: numOr('pressure_zero', 0.01),
     overpressureLimit: numOr('overpressure_limit', 20),
@@ -50,6 +55,7 @@ export function buildAutoConfig(
     flowRateZero: numOr('flow_rate_zero', 0.01),
     pumpIdleSeconds: numOr('pump_idle_seconds', 60),
     pumpStartGrace: numOr('pump_start_grace', 10),
+    flowUnchangedEnabled: boolOr('flow_unchanged_enabled', true),
     flowUnchangedSeconds: numOr('flow_unchanged_seconds', 15),
     sensorOfflineSeconds: numOr('sensor_offline_seconds', 60),
     deviceSyncFrames: numOr('device_sync_frames', 0),
