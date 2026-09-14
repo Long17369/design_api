@@ -13,6 +13,10 @@ interface PidState {
   cycleStart: number | null
   /** 当前 PWM 周期内**已导通**时长(秒) */
   onSec: number
+  /** 本周期内是否已关闭过（硬滞环：关掉就不再开，防 duty 回升又开导致帧级 bang-bang） */
+  cycleClosed: boolean
+  /** 最近一次关加热的时刻(ms)：用于最小关断间隔 */
+  offAt: number | null
   /** 上次生效的目标温度（目标变化时据此清积分） */
   target: number | null
 }
@@ -42,10 +46,26 @@ const DT_MAX_SEC = 10
  */
 const MIN_ON_SEC = 1
 
+/**
+ * 最小关断时间（秒）：关加热后至少这么久不再开。
+ * 设备是**机械继电器**，开关次数 = 寿命 ⇒ 必须禁止帧级反复开关
+ * （仅靠调参做不到：duty 在量化台阶边缘抖动时，旧实现每 3~4 s 就开关一次，实测 750~985 次/h）。
+ */
+const MIN_OFF_SEC = 3
+
 function stateOf(dNo: string): PidState {
   let state = states.get(dNo)
   if (!state) {
-    state = { integral: 0, lastError: null, lastAt: null, cycleStart: null, onSec: 0, target: null }
+    state = {
+      integral: 0,
+      lastError: null,
+      lastAt: null,
+      cycleStart: null,
+      onSec: 0,
+      cycleClosed: false,
+      offAt: null,
+      target: null,
+    }
     states.set(dNo, state)
   }
   return state
@@ -58,6 +78,8 @@ function reset(state: PidState): void {
   state.lastAt = null
   state.cycleStart = null
   state.onSec = 0
+  state.cycleClosed = false
+  state.offAt = null
   state.target = null
 }
 
@@ -80,6 +102,10 @@ function reset(state: PidState): void {
  *   都在周期起点导通整帧（实测「占空比 0.4% 却开加热」，一帧满功率 ≈ 7~9 s 的散热量）；
  *   并设最小导通时间 `MIN_ON_SEC`；`onSec` 只增不减 ⇒ 一旦关掉本周期不会再开
  *   ⇒ 天然满足最小关断时间，每个周期最多开关各一次（下发次数有界，符合设备下发频率限制）
+ * - **硬滞环（2026-09-14，设备是机械继电器）**：一旦本周期关掉就**锁定不再开**，
+ *   且关断后至少 `MIN_OFF_SEC` 内不再开 —— 否则 duty 在量化台阶边缘抖动时会把继电器
+ *   帧级反复吸合（实测 750~985 次/h，等于几天就用完触点寿命）。加锁后开关次数上限 = **2/周期**
+ *   （`pid_cycle`=60 → ≤120 次/h），代价是压力修正延后到下一周期 ⇒ 周期与 `Kp` 需配套整定
  * - **防干烧**：水泵未运行（指令值非 1）时不输出，并重置 PID 状态
  * - **安全优先**：本组件（priority 75）排在恒温保护（80）之前，超温等安全判定仍会覆盖其输出
  * - 幂等：只在「期望开关状态 ≠ 当前 direct heat 值」时下发
@@ -149,20 +175,28 @@ export const pidTempComponent: AutoComponent = {
 
     const duty = Math.max(DUTY_MIN, Math.min(DUTY_MAX, p + cfg.pidKi * state.integral + d))
 
-    // ---------- PWM：周期内按占空比累计导通（带最小导通时间） ----------
+    // ---------- PWM：周期内按占空比累计导通（硬滞环） ----------
     const cycleMs = cfg.pidCycle * 1000
     if (state.cycleStart === null || now - state.cycleStart >= cycleMs) {
       state.cycleStart = now
       state.onSec = 0
+      state.cycleClosed = false
     }
+    const heating = values.get('heat') === '1'
     // 按**实际**导通时长累计（读设备当前值：被安全逻辑关掉也能自愈）
-    if (values.get('heat') === '1' && dtSec > 0) {
-      state.onSec = Math.min(cfg.pidCycle, state.onSec + dtSec)
+    if (heating && dtSec > 0) state.onSec = Math.min(cfg.pidCycle, state.onSec + dtSec)
+    // 机械继电器：关断后至少 MIN_OFF_SEC 内不再开；且**本周期份额用完后本周期不再开**
+    const offCooled = state.offAt === null || now - state.offAt >= MIN_OFF_SEC * 1000
+    const demandLeft = duty * cfg.pidCycle - state.onSec
+    const desiredOn =
+      offCooled && (duty >= DUTY_MAX || (!state.cycleClosed && demandLeft >= MIN_ON_SEC))
+    // 正在加热但要关 → 记住关断时刻并锁定本周期（避免 duty 回升又把继电器吸合）
+    if (heating && !desiredOn) {
+      state.offAt = now
+      state.cycleClosed = true
     }
-    // 满输出常开（升温/安全兜底不做斩波）；其余看本周期还差多少导通量
-    const desiredOn = duty >= DUTY_MAX || duty * cfg.pidCycle - state.onSec >= MIN_ON_SEC
     const desired = desiredOn ? '1' : '0'
-    if (values.get('heat') === desired) return null
+    if (heating === desiredOn) return null
 
     return {
       reason: `PID 控温：目标 ${cfg.pidTarget}，实测 ${measured}，占空比 ${(duty * 100).toFixed(1)}%（${desiredOn ? '开' : '关'}加热）`,

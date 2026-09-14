@@ -204,7 +204,7 @@ describe('PID 控温（PWM）', () => {
     }
   })
 
-  it('最小关断时间：本周期导通量用完后不再开（避免整数秒抖动反复开关）', () => {
+  it('本周期导通量用完后不再开（避免整数秒抖动反复开关）', () => {
     // duty=0.15 → 10s 周期只需导通 1.5s；按 1s 帧采样，导通 1 帧后剩余 0.5s < 1s → 关
     const cfg = { ...CFG, pidKp: 0.015, pidKi: 0, pidKd: 0, pidCycle: 10 } // e=10 → duty=0.15
     const t0 = 4_600_000
@@ -224,6 +224,50 @@ describe('PID 控温（PWM）', () => {
     // 新周期 → 重新导通
     expect(
       pidTempComponent.evaluate(ctx('20', t0 + 10_500, { heat: '0', water: '1' }, cfg))?.controls,
+    ).toEqual([{ target: 'heat', value: '1' }])
+  })
+
+  it('硬滞环：本周期关掉后即使 duty 回升也不再开（机械继电器不能反复吸合）', () => {
+    // Kp=0.06、e=10 → duty=0.6（不饱和，避免走进「满输出常开」旁路）
+    const cfg = { ...CFG, pidKp: 0.06, pidKi: 0, pidKd: 0, pidCycle: 10, pidTarget: 30 }
+    const t0 = 4_700_000
+    expect(
+      pidTempComponent.evaluate(ctx('20', t0, { heat: '0', water: '1' }, cfg))?.controls,
+    ).toEqual([{ target: 'heat', value: '1' }])
+    // 超温 → duty 0 → 关（并锁定本周期）
+    expect(
+      pidTempComponent.evaluate(ctx('32', t0 + 1000, { heat: '1', water: '1' }, cfg))?.controls,
+    ).toEqual([{ target: 'heat', value: '0' }])
+    // duty 回到 0.6，但本周期已锁定 → 不再开（旧实现会立刻重新吸合）
+    expect(
+      pidTempComponent.evaluate(ctx('20', t0 + 2000, { heat: '0', water: '1' }, cfg)),
+    ).toBeNull()
+    expect(
+      pidTempComponent.evaluate(ctx('20', t0 + 9000, { heat: '0', water: '1' }, cfg)),
+    ).toBeNull()
+    // 新周期 → 恢复可开
+    expect(
+      pidTempComponent.evaluate(ctx('20', t0 + 10_500, { heat: '0', water: '1' }, cfg))?.controls,
+    ).toEqual([{ target: 'heat', value: '1' }])
+  })
+
+  it('最小关断时间：刚关掉后即使跨周期也不马上再开', () => {
+    const cfg = { ...CFG, pidKp: 0.06, pidKi: 0, pidKd: 0, pidCycle: 2, pidTarget: 30 }
+    const t0 = 4_800_000
+    expect(
+      pidTempComponent.evaluate(ctx('20', t0, { heat: '0', water: '1' }, cfg))?.controls,
+    ).toEqual([{ target: 'heat', value: '1' }])
+    // 关断（offAt = t0+1000）
+    expect(
+      pidTempComponent.evaluate(ctx('32', t0 + 1000, { heat: '1', water: '1' }, cfg))?.controls,
+    ).toEqual([{ target: 'heat', value: '0' }])
+    // t0+2000 已进入新周期（2s），但距关断仅 1s < MIN_OFF_SEC(3s) → 仍不开
+    expect(
+      pidTempComponent.evaluate(ctx('20', t0 + 2000, { heat: '0', water: '1' }, cfg)),
+    ).toBeNull()
+    // t0+4000：距关断 3s ≥ MIN_OFF_SEC → 允许开
+    expect(
+      pidTempComponent.evaluate(ctx('20', t0 + 4000, { heat: '0', water: '1' }, cfg))?.controls,
     ).toEqual([{ target: 'heat', value: '1' }])
   })
 })
