@@ -15,6 +15,7 @@ import {
   intOr,
   parseTime,
   pushSample,
+  stripOfflineSentinels,
   toNum,
   toWsData,
 } from './utils'
@@ -83,12 +84,15 @@ export class SensorModule implements Closable {
   /**
    * 处理一条原始上报数据：计算派生指标 → 落库 → 再分发。
    */
-  private async process(raw: DataPayload): Promise<void> {
+  private async process(payload: DataPayload): Promise<void> {
     const db = this.database
     if (!db) {
       logger.warn('SensorModule 尚未注入 Database，跳过处理')
       return
     }
+
+    // 传感器离线时设备回最大值（0xFFFF/10 = 6553.5）⇒ 入口处直接剔除为缺测
+    const raw = stripOfflineSentinels(payload)
 
     const [config, mapper] = await Promise.all([this.loadConfig(db), this.loadMapper(db)])
     const now = parseTime(raw.time)

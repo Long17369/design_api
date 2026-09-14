@@ -20,6 +20,31 @@ export function intOr(value: string | number | null | undefined, fallback: numbe
   return n === null ? fallback : Math.trunc(n)
 }
 
+/**
+ * 传感器离线 / 断线时设备回 **0xFFFF**，按 ×10 缩放后表现为 **6553.5**。
+ * 实测（2026-09-14 16:16:31~16:17:12）：`temp_in`/`temp_out` 各 41~42 帧上报 6553.5，
+ * 其余字段正常 —— 若不剔除，会被当成真实温度进入自动控制（超温关加热、温度异常判塔塞）
+ * 与前端曲线。故按「最大值即无效」直接排除。
+ */
+const OFFLINE_SENTINELS = [65535, 6553.5]
+
+/** 参与哨兵值判定的测量类字段（开关类字段不参与） */
+const MEASURED_KEYS = ['temp_in', 'temp_out', 'pressure', 'flow_rate'] as const
+
+/**
+ * 剔除传感器离线哨兵值：命中即置为**空串**（= 缺测，类型仍合法）。
+ * 下游一致按缺测处理：`toNum('')` → null（组件跳过判定）、`buildSensorRow` 跳过空值
+ * （该列落库为 NULL）、`pushSample`/`accumulateFlow` 跳过 null。
+ */
+export function stripOfflineSentinels(payload: DataPayload): DataPayload {
+  const out = { ...payload }
+  for (const key of MEASURED_KEYS) {
+    const v = toNum(out[key])
+    if (v !== null && OFFLINE_SENTINELS.includes(v)) out[key] = ''
+  }
+  return out
+}
+
 /** 数字格式化为字符串（默认 2 位小数，去掉多余的 0） */
 export function fmt(n: number, digits = 2): string {
   return String(Number(n.toFixed(digits)))

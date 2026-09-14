@@ -133,6 +133,42 @@ result.phase3 = {
 const twice = await waitFor(async () => (await offlineRows()) === 2, 25_000)
 result.phase4 = { rows: await offlineRows(), twice }
 
+// ---------- ⑤ 传感器离线哨兵值（0xFFFF/10 = 6553.5）→ 按缺测处理 ----------
+// 期望：该列不入库（NULL）、WS 推送里该字段为空串（前端与自动控制均按缺测）
+const tempCol =
+  (await q("SELECT db_name FROM sensor_data_mapper WHERE api_name = 'temp_in' LIMIT 1"))[0]
+    ?.db_name ?? 'field1'
+const from5 = events.length
+await new Promise((resolve) => {
+  pub.publish(
+    'data/',
+    JSON.stringify({
+      id: D_NO,
+      time: nowStr(),
+      temp_in: 6553.5,
+      temp_out: 6553.5,
+      heat_Y1: 0,
+      water_Y2: 0,
+      flow_rate: 0,
+      pressure: 5,
+    }),
+    resolve,
+  )
+})
+await sleep(1500)
+const sentinelRow = (
+  await q(
+    `SELECT \`${tempCol}\` AS tempIn FROM sensor_data WHERE d_no = ? ORDER BY id DESC LIMIT 1`,
+    [D_NO],
+  )
+)[0]
+const sentinelWs = events.slice(from5).find((e) => e.data?.d_no === D_NO)?.data ?? null
+result.phase5 = {
+  rows: Number((await q('SELECT COUNT(*) AS c FROM sensor_data WHERE d_no = ?', [D_NO]))[0].c),
+  tempIn: sentinelRow?.tempIn ?? null,
+  wsTempIn: sentinelWs?.wen_du1 ?? null,
+}
+
 // ---------- 清理 ----------
 await reset()
 for (const table of ['direct', 'error_msg', 'control_log', 'sensor_data', 'device_locks']) {
@@ -158,6 +194,8 @@ check(
 check('② 持续离线不重复告警', result.phase2.rows === 1)
 check('③ 恢复上报 → 推送 type=reset 事件', result.phase3.event?.data?.type === 'reset')
 check('④ 再次离线 → 可再次告警', result.phase4.rows === 2)
+check('⑤ 离线哨兵值 6553.5 不入库（列为 NULL）', result.phase5.tempIn === null)
+check('⑤ WS 推送中该字段为空串（按缺测）', result.phase5.wsTempIn === '')
 
 console.log('\n汇总:', JSON.stringify(result))
 if (checks.some((c) => !c.ok)) {
