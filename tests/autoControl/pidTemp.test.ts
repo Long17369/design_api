@@ -104,21 +104,28 @@ describe('PID 控温（PWM）', () => {
     expect(off?.controls).toEqual([{ target: 'heat', value: '0' }])
   })
 
-  it('PWM：周期内按占空比先开后关（duty=0.5 → 半周期后关闭）', () => {
-    const cfg = { ...CFG, pidKp: 0.05, pidCycle: 10 } // e=10 → duty=0.5
+  it('PWM（ΔΣ）：欠账累积满一段才导通，还清即关断（duty=0.5 → 导通段≈2×段长）', () => {
+    // 段长阀值 = min(duty×周期, MAX_BURST_SEC=2s) → duty=0.5 时 = 2s，欠账 0.5s/s → 4s 才开
+    const cfg = { ...CFG, pidKp: 0.05, pidKi: 0, pidKd: 0, pidCycle: 10 } // e=10 → duty=0.5
     const t0 = 3_000_000
-    const first = pidTempComponent.evaluate(ctx('20', t0, { heat: '0', water: '1' }, cfg))
-    expect(first?.controls).toEqual([{ target: 'heat', value: '1' }])
-    // 4s < 5s（半周期）→ 仍应保持开（幂等）
+    // 首帧只建时间基准（dt=0）→ 欠账仍为 0 → 不开
+    expect(pidTempComponent.evaluate(ctx('20', t0, { heat: '0', water: '1' }, cfg))).toBeNull()
+    // 3s：欠账 1.5s < 段长 2s → 仍不开
     expect(
-      pidTempComponent.evaluate(ctx('20', t0 + 4000, { heat: '1', water: '1' }, cfg)),
+      pidTempComponent.evaluate(ctx('20', t0 + 3000, { heat: '0', water: '1' }, cfg)),
     ).toBeNull()
-    // 6s > 5s → 关加热
-    const second = pidTempComponent.evaluate(ctx('20', t0 + 6000, { heat: '1', water: '1' }, cfg))
-    expect(second?.controls).toEqual([{ target: 'heat', value: '0' }])
-    // 新周期起点（10s）→ 重新开
-    const third = pidTempComponent.evaluate(ctx('20', t0 + 10_500, { heat: '0', water: '1' }, cfg))
-    expect(third?.controls).toEqual([{ target: 'heat', value: '1' }])
+    // 4s：欠账满 2s → 导通
+    expect(
+      pidTempComponent.evaluate(ctx('20', t0 + 4000, { heat: '0', water: '1' }, cfg))?.controls,
+    ).toEqual([{ target: 'heat', value: '1' }])
+    // 还账中（欠账 0.5s > 0）→ 保持导通、幂等
+    expect(
+      pidTempComponent.evaluate(ctx('20', t0 + 7000, { heat: '1', water: '1' }, cfg)),
+    ).toBeNull()
+    // 8s：欠账还清 → 关断（导通段 = 段长/(1−duty) = 4s）
+    expect(
+      pidTempComponent.evaluate(ctx('20', t0 + 8000, { heat: '1', water: '1' }, cfg))?.controls,
+    ).toEqual([{ target: 'heat', value: '0' }])
   })
 
   it('积分项按「等效输出」限幅：持续偏差也不会让积分单项顶满输出', () => {
@@ -127,12 +134,17 @@ describe('PID 控温（PWM）', () => {
     const t0 = 4_000_000
     // 首帧只建立时间基准（dt=0）→ 不动
     pidTempComponent.evaluate(ctx('20', t0, { heat: '0', water: '1' }, cfg))
-    // 误差已积分 → duty = Ki·∫ ≤ 0.2 → 周期前 2s 内应开加热
-    const on = pidTempComponent.evaluate(ctx('20', t0 + 1000, { heat: '0', water: '1' }, cfg))
+    // 误差已积分但被限幅 → duty = Ki·∫ ≤ 0.2 → 欠账累积很慢（0.2s/s）
+    for (let i = 1; i <= 9; i++) {
+      expect(
+        pidTempComponent.evaluate(ctx('20', t0 + i * 1000, { heat: '0', water: '1' }, cfg)),
+      ).toBeNull()
+    }
+    // 约 10s 后欠账满 2s（= 0.2 × 10）= 段长阀值 → 导通，且日志占空比就是 20.0%
+    // （浮点累积会晚一帧，故取 11s）
+    const on = pidTempComponent.evaluate(ctx('20', t0 + 11_000, { heat: '0', water: '1' }, cfg))
     expect(on?.controls).toEqual([{ target: 'heat', value: '1' }])
-    // 第 5s 已超出 2s 窗口 → 关加热（若积分不限幅，duty 早已顶到 1，这里仍是开）
-    const off = pidTempComponent.evaluate(ctx('20', t0 + 5000, { heat: '1', water: '1' }, cfg))
-    expect(off?.controls).toEqual([{ target: 'heat', value: '0' }])
+    expect(on?.reason).toContain('20.0%')
   })
 
   it('升温段积满积分后，过冲瞬间必须关加热（修「升温段污染稳定段」）', () => {
@@ -188,86 +200,75 @@ describe('PID 控温（PWM）', () => {
     expect(decision?.controls).toEqual([{ target: 'heat', value: '0' }])
   })
 
-  it('占空比低于最小导通时间 → 整个周期都不开加热（修「0% 却开加热」）', () => {
-    // e=10、Kp=0.0004 → duty=0.004（10s 周期只该导通 0.04s）
+  it('极小占空比 → 一帧导通 + 超长间隔（平均占空比仍正确）', () => {
+    // e=10、Kp=0.0004 → duty=0.004 → 段长阀值取 1 帧 ⇒ 约 250s 才导通 1 帧
     const cfg = { ...CFG, pidKp: 0.0004, pidKi: 0, pidKd: 0, pidCycle: 10 }
     const t0 = 4_500_000
-    // 若此刻正在加热（上一周期残留），必须立刻关掉
-    expect(
-      pidTempComponent.evaluate(ctx('20', t0, { heat: '1', water: '1' }, cfg))?.controls,
-    ).toEqual([{ target: 'heat', value: '0' }])
-    // 整个周期（10 帧）都不应开加热；旧实现 `elapsed < duty×cycle` 在周期起点为真 → 会导通整帧
-    for (let i = 1; i <= 10; i++) {
+    for (let i = 0; i <= 200; i++) {
       expect(
         pidTempComponent.evaluate(ctx('20', t0 + i * 1000, { heat: '0', water: '1' }, cfg)),
       ).toBeNull()
     }
+    // 约 250s 后欠账满 1s → 导通一帧（不再出现「周期起点白导通一帧」）
+    let firstOnAt = 0
+    for (let i = 201; i <= 260 && !firstOnAt; i++) {
+      const d = pidTempComponent.evaluate(ctx('20', t0 + i * 1000, { heat: '0', water: '1' }, cfg))
+      if (d) firstOnAt = i
+    }
+    expect(firstOnAt).toBeGreaterThanOrEqual(240)
+    expect(firstOnAt).toBeLessThanOrEqual(260)
   })
 
-  it('本周期导通量用完后不再开（避免整数秒抖动反复开关）', () => {
-    // duty=0.15 → 10s 周期只需导通 1.5s；按 1s 帧采样，导通 1 帧后剩余 0.5s < 1s → 关
-    const cfg = { ...CFG, pidKp: 0.015, pidKi: 0, pidKd: 0, pidCycle: 10 } // e=10 → duty=0.15
-    const t0 = 4_600_000
-    expect(
-      pidTempComponent.evaluate(ctx('20', t0, { heat: '0', water: '1' }, cfg))?.controls,
-    ).toEqual([{ target: 'heat', value: '1' }])
-    expect(
-      pidTempComponent.evaluate(ctx('20', t0 + 1000, { heat: '1', water: '1' }, cfg))?.controls,
-    ).toEqual([{ target: 'heat', value: '0' }])
-    // 关掉之后本周期（到 10s）都不再开
-    expect(
-      pidTempComponent.evaluate(ctx('20', t0 + 2000, { heat: '0', water: '1' }, cfg)),
-    ).toBeNull()
-    expect(
-      pidTempComponent.evaluate(ctx('20', t0 + 9000, { heat: '0', water: '1' }, cfg)),
-    ).toBeNull()
-    // 新周期 → 重新导通
-    expect(
-      pidTempComponent.evaluate(ctx('20', t0 + 10_500, { heat: '0', water: '1' }, cfg))?.controls,
-    ).toEqual([{ target: 'heat', value: '1' }])
-  })
-
-  it('硬滞环：本周期关掉后即使 duty 回升也不再开（机械继电器不能反复吸合）', () => {
-    // Kp=0.06、e=10 → duty=0.6（不饱和，避免走进「满输出常开」旁路）
+  it('过冲（温度越过目标）时欠账清零 → 立刻停止放热', () => {
+    // Kp=0.06、e=10 → duty=0.6 → 段长阀值 = 6s
     const cfg = { ...CFG, pidKp: 0.06, pidKi: 0, pidKd: 0, pidCycle: 10, pidTarget: 30 }
-    const t0 = 4_700_000
-    expect(
-      pidTempComponent.evaluate(ctx('20', t0, { heat: '0', water: '1' }, cfg))?.controls,
-    ).toEqual([{ target: 'heat', value: '1' }])
-    // 超温 → duty 0 → 关（并锁定本周期）
-    expect(
-      pidTempComponent.evaluate(ctx('32', t0 + 1000, { heat: '1', water: '1' }, cfg))?.controls,
-    ).toEqual([{ target: 'heat', value: '0' }])
-    // duty 回到 0.6，但本周期已锁定 → 不再开（旧实现会立刻重新吸合）
-    expect(
-      pidTempComponent.evaluate(ctx('20', t0 + 2000, { heat: '0', water: '1' }, cfg)),
-    ).toBeNull()
-    expect(
-      pidTempComponent.evaluate(ctx('20', t0 + 9000, { heat: '0', water: '1' }, cfg)),
-    ).toBeNull()
-    // 新周期 → 恢复可开
-    expect(
-      pidTempComponent.evaluate(ctx('20', t0 + 10_500, { heat: '0', water: '1' }, cfg))?.controls,
-    ).toEqual([{ target: 'heat', value: '1' }])
+    let t = 4_700_000
+    let heat: '0' | '1' = '0'
+    // duty=0.6：欠账 0.6s/s → 段长上限 2s ⇒ 约 3.3s 导通
+    let firstOnAt = 0
+    for (let i = 1; i <= 8 && !firstOnAt; i++) {
+      t += 1000
+      const d = pidTempComponent.evaluate(ctx('20', t, { heat, water: '1' }, cfg))
+      if (d) {
+        heat = (d.controls?.[0]?.value ?? heat) as '0' | '1'
+        if (heat === '1') firstOnAt = i
+      }
+    }
+    expect(firstOnAt).toBeGreaterThanOrEqual(3)
+    expect(firstOnAt).toBeLessThanOrEqual(5)
+    // 温度越过目标（误差由正转负）→ 欠账清零 → 立刻关断（不把本段放完）
+    // 旧行为（不清欠账）会把 OFF 期间累积的欠账继续放热 ⇒ 实测过冲 0.61 ℃
+    t += 1000
+    expect(pidTempComponent.evaluate(ctx('32', t, { heat, water: '1' }, cfg))?.controls).toEqual([
+      { target: 'heat', value: '0' },
+    ])
+    // 关断后要重新累积欠账才会再开（段长 2s ÷ duty 0.6 ≈ 3.3s）：前 2 帧仍不开
+    for (let i = 0; i < 2; i++) {
+      t += 1000
+      const d = pidTempComponent.evaluate(ctx('20', t, { heat, water: '1' }, cfg))
+      if (d) heat = (d.controls?.[0]?.value ?? heat) as '0' | '1'
+      expect(heat).toBe('0')
+    }
   })
 
-  it('最小关断时间：刚关掉后即使跨周期也不马上再开', () => {
-    const cfg = { ...CFG, pidKp: 0.06, pidKi: 0, pidKd: 0, pidCycle: 2, pidTarget: 30 }
+  it('最小关断时间：刚关掉后 MIN_OFF_SEC 内不再开', () => {
+    const cfg = { ...CFG, pidKp: 0.05, pidKi: 0, pidKd: 0, pidCycle: 1 } // duty=0.5 → 段长阀值 1s
     const t0 = 4_800_000
+    expect(pidTempComponent.evaluate(ctx('20', t0, { heat: '0', water: '1' }, cfg))).toBeNull()
     expect(
-      pidTempComponent.evaluate(ctx('20', t0, { heat: '0', water: '1' }, cfg))?.controls,
+      pidTempComponent.evaluate(ctx('20', t0 + 2000, { heat: '0', water: '1' }, cfg))?.controls,
     ).toEqual([{ target: 'heat', value: '1' }])
-    // 关断（offAt = t0+1000）
+    // 欠账还清 → 关断（offAt = t0+4000）
     expect(
-      pidTempComponent.evaluate(ctx('32', t0 + 1000, { heat: '1', water: '1' }, cfg))?.controls,
+      pidTempComponent.evaluate(ctx('20', t0 + 4000, { heat: '1', water: '1' }, cfg))?.controls,
     ).toEqual([{ target: 'heat', value: '0' }])
-    // t0+2000 已进入新周期（2s），但距关断仅 1s < MIN_OFF_SEC(3s) → 仍不开
+    // t0+6000：欠账已再次积满，但距关断仅 2s < MIN_OFF_SEC(3s) → 仍不开
     expect(
-      pidTempComponent.evaluate(ctx('20', t0 + 2000, { heat: '0', water: '1' }, cfg)),
+      pidTempComponent.evaluate(ctx('20', t0 + 6000, { heat: '0', water: '1' }, cfg)),
     ).toBeNull()
-    // t0+4000：距关断 3s ≥ MIN_OFF_SEC → 允许开
+    // t0+7000：距关断 3s ≥ MIN_OFF_SEC → 允许开
     expect(
-      pidTempComponent.evaluate(ctx('20', t0 + 4000, { heat: '0', water: '1' }, cfg))?.controls,
+      pidTempComponent.evaluate(ctx('20', t0 + 7000, { heat: '0', water: '1' }, cfg))?.controls,
     ).toEqual([{ target: 'heat', value: '1' }])
   })
 })
