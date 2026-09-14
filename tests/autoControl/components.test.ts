@@ -133,19 +133,13 @@ describe('累计流量不变（堵塞保护）', () => {
   it('计时状态由组件自持：需连续无变化达到阈值时长', () => {
     const dNo = 'D_U1'
     flowUnchangedComponent.clearState?.(dNo)
+    const run = (total: string, now: number) =>
+      ctx({ liu_liang1: total, shui_beng: '1' }, { now, dNo, values: { water: '1' } })
     expect(flowUnchangedComponent.evaluate(ctx({ liu_liang1: '0.00' }))).toBeNull()
-    expect(
-      flowUnchangedComponent.evaluate(ctx({ liu_liang1: '10.00' }, { now: 1000, dNo })),
-    ).toBeNull()
-    expect(
-      flowUnchangedComponent.evaluate(ctx({ liu_liang1: '10.00' }, { now: 2000, dNo })),
-    ).toBeNull()
-    expect(
-      flowUnchangedComponent.evaluate(ctx({ liu_liang1: '10.00' }, { now: 2000 + 14_000, dNo })),
-    ).toBeNull()
-    const decision = flowUnchangedComponent.evaluate(
-      ctx({ liu_liang1: '10.00' }, { now: 2000 + 16_000, dNo }),
-    )
+    expect(flowUnchangedComponent.evaluate(run('10.00', 1000))).toBeNull()
+    expect(flowUnchangedComponent.evaluate(run('10.00', 2000))).toBeNull()
+    expect(flowUnchangedComponent.evaluate(run('10.00', 2000 + 14_000))).toBeNull()
+    const decision = flowUnchangedComponent.evaluate(run('10.00', 2000 + 16_000))
     expect(decision?.alarm?.code).toBe('flow_unchanged')
     expect(decision?.block).toBe(true)
     flowUnchangedComponent.clearState?.(dNo)
@@ -154,16 +148,34 @@ describe('累计流量不变（堵塞保护）', () => {
   it('流量恢复变化会重置计时', () => {
     const dNo = 'D_U2'
     flowUnchangedComponent.clearState?.(dNo)
-    expect(
-      flowUnchangedComponent.evaluate(ctx({ liu_liang1: '12.00' }, { now: 60_000, dNo })),
-    ).toBeNull()
-    expect(
-      flowUnchangedComponent.evaluate(ctx({ liu_liang1: '12.00' }, { now: 61_000, dNo })),
-    ).toBeNull()
-    expect(
-      flowUnchangedComponent.evaluate(ctx({ liu_liang1: '12.00' }, { now: 61_000 + 15_100, dNo }))
-        ?.alarm?.code,
-    ).toBe('flow_unchanged')
+    const run = (total: string, now: number) =>
+      ctx({ liu_liang1: total, shui_beng: '1' }, { now, dNo, values: { water: '1' } })
+    expect(flowUnchangedComponent.evaluate(run('12.00', 60_000))).toBeNull()
+    expect(flowUnchangedComponent.evaluate(run('12.00', 61_000))).toBeNull()
+    expect(flowUnchangedComponent.evaluate(run('12.00', 61_000 + 15_100))?.alarm?.code).toBe(
+      'flow_unchanged',
+    )
+    flowUnchangedComponent.clearState?.(dNo)
+  })
+
+  it('水泵未运行时不判定（停机后累计流量本就冻结）', () => {
+    // 实测：停泵后累计流量冻结在 791.08（1072/1085 帧无变化）⇒ 旧实现停机 ~1 分钟就误报堵塞
+    const dNo = 'D_U3'
+    flowUnchangedComponent.clearState?.(dNo)
+    const off = (now: number) =>
+      ctx({ liu_liang1: '791.08', shui_beng: '0' }, { now, dNo, values: { water: '0' } })
+    expect(flowUnchangedComponent.evaluate(off(1000))).toBeNull()
+    expect(flowUnchangedComponent.evaluate(off(1000 + 16_000))).toBeNull()
+    expect(flowUnchangedComponent.evaluate(off(1000 + 5 * 60_000))).toBeNull()
+
+    // 重新开泵后要重新计时（不带着停机期间的「不变」时长）
+    const on = (now: number) =>
+      ctx({ liu_liang1: '791.08', shui_beng: '1' }, { now, dNo, values: { water: '1' } })
+    expect(flowUnchangedComponent.evaluate(on(400_000))).toBeNull()
+    expect(flowUnchangedComponent.evaluate(on(400_000 + 14_000))).toBeNull()
+    expect(flowUnchangedComponent.evaluate(on(400_000 + 16_000))?.alarm?.code).toBe(
+      'flow_unchanged',
+    )
     flowUnchangedComponent.clearState?.(dNo)
   })
 })

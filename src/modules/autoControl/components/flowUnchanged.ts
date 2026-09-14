@@ -28,9 +28,14 @@ function stateOf(dNo: string): FlowUnchangedState {
 }
 
 /**
- * 堵塞判定③：累计流量不变 —— 累计流量连续 flow_unchanged_seconds 秒无变化
+ * 堵塞判定③：累计流量不变 —— **水泵运行中** 且累计流量连续 flow_unchanged_seconds 秒无变化
  * （累计流量为 0/无效时不计时，避免设备未开始计量就误判）。
  * 命中即执行堵塞保护（关加热 + 关水泵 + 加 blocked 锁（持久化与推送由 LockModule 负责） + 预警）。
+ *
+ * ⚠️ 必须有「水泵运行中」前置条件：**停机后累计流量本就不会变化**（实测停泵后累计值
+ * 冻结在 791.08、1072/1085 帧无变化），否则每次停泵都会被判成堵塞（实测停机 ~1 分钟后误报）。
+ * 与 `flowZero`（空转保护）的泵运行判定保持一致：**指令值与上报值任一为开**。
+ *
  * 相关配置：flow_unchanged_seconds（累计流量不变持续秒数）
  */
 export const flowUnchangedComponent: AutoComponent = {
@@ -48,6 +53,15 @@ export const flowUnchangedComponent: AutoComponent = {
 
     // 累计流量无效或为 0：不计时
     if (total === null || total <= 0) {
+      state.lastTotal = total
+      state.since = null
+      return null
+    }
+
+    // 水泵未运行（指令与上报都不是「开」）→ 累计流量本就不会变化，不判定
+    // 否则每次停泵都会误报「水管堵塞：累计流量无变化」（实测停机 ~1 分钟即触发）
+    const pumpRunning = ctx.values.get('water') === '1' || ctx.data.shui_beng === '1'
+    if (!pumpRunning) {
       state.lastTotal = total
       state.since = null
       return null
