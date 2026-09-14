@@ -91,6 +91,7 @@
 - [x] `seeds` 幂等初始化（只补缺失、不覆盖删除）；「列定义 + 值行」列表形式（490 → 147 行）
 - [x] 配置加载：`fs.readFileSync` + `JSON.parse` + Ajv（`useDefaults`，`timezone` 默认 `'Z'`）
 - [x] 缓存 key 规范与清单：`@core/cache` 只提供通用能力（KV + TTL + tag 失效），**key 由使用它的模块自己定义**（不在 core 集中登记）；命名 `<模块>:<用途>`、`tag` 必须等于来源表名；清单与编码规范见 `docs/CACHE.md`
+- [x] seeds 一致性自检：`tests/e2e/verify_seeds.ts` 逐表逐列比对「seeds 定义 vs 库中现有行」（输出 `SEEDS_EQUIVALENT_OK`）；借此发现并修掉 `sensor_spike_*` 的 `order` 漂移（新增开关行后原 4 行未后移，出现重复 21 号）——seeds 只补不覆盖，改既有行定义必须手工迁移（SQL 见 `docs/API-CHANGES.md` 升级须知）
 - [x] 累计流量持久化（已实现）：进程启动后首次上报时，从该设备**最后一条落库帧**（mapper 中 `api_name='liu_liang1'` 对应列，默认 `field5`）恢复累计值 → 重启不再归零（日志「累计流量已恢复: <d_no> = <N>L」）；无历史数据则从 0 开始
 
 ## 工程 / 工具 / 依赖

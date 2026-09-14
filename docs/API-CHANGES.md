@@ -78,6 +78,20 @@
 
   seeds 只补缺失行、不覆盖既有行，故已存在的库需手工执行一次；`sensor_spike_enabled` 为新行，启动时自动补。
 
+- **`sensor_spike_*` 排序号迁移**：新增开关 `sensor_spike_enabled`(order=21) 后，原 4 行的
+  `order` 未同步后移，会出现与开关同号（21）的重复值：
+
+  ```sql
+  UPDATE direct_config SET `order` = CASE code
+    WHEN 'sensor_spike_frames' THEN '22' WHEN 'sensor_spike_temp' THEN '23'
+    WHEN 'sensor_spike_pressure' THEN '24' WHEN 'sensor_spike_flow' THEN '24.5' END
+    WHERE code IN ('sensor_spike_frames','sensor_spike_temp','sensor_spike_pressure','sensor_spike_flow');
+  ```
+
+- **改过 seeds 后如何自检**：`pnpm exec tsx tests/e2e/verify_seeds.ts` 会逐表逐列比对
+  「seeds 定义 vs 库中现有行」，全部一致时输出 `SEEDS_EQUIVALENT_OK`（不一致会列出具体行/列并以
+  非 0 退出）。seeds 只补缺失行**不覆盖**已有行，所以修改既有行的定义后必须像上面这样手工迁移。
+
   **层级门控语义**（与前端 `ControlPanel.isConfigVisible` 一致）：
   无 `ref_code` → 恒可见；父不可见 → 子不可见（**递归**）；
   父当前值取「设备 `direct` 值 → 父 `default_value` → 空」，为空则不可见；
