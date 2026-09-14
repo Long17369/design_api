@@ -22,11 +22,9 @@ import {
   handleTimeRange,
 } from './utils'
 import { DataSourceDef, RouteHandler } from '.'
+import { API_BASE } from '@gateways/utils'
 
 const logger = log.getLogger('HttpServer')
-
-/** 对外接口统一前缀，与前端 api.ts 的 BASE_URL 保持一致 */
-const API_BASE = '/api'
 
 export class HttpServer implements Closable {
   private app: express.Express

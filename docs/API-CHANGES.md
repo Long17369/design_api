@@ -4,7 +4,7 @@
 
 ## 通用约定
 
-- 统一前缀：`/api`（前端 `BASE_URL` 已是 `/api`，无需改）
+- 统一前缀：`/api`（契约文件 `api.ts` 直接用后端常量 `API_BASE`，无需改）
 - 成功：`{ "success": true, "data": ... }`
 - 失败：`{ "success": false, "error": { "message": string, "code": string } }`
   - `code` ∈ `INVALID_PARAMETER | DATABASE_ERROR | INVALID_PARAMS | UNKNOWN_ERROR | NOT_IMPLEMENTED`
@@ -14,7 +14,11 @@
   - `start`/`end` 必填，格式 `YYYY-MM-DD HH:mm:ss`（`+`/`%20` 编码空格均可）
   - `buckets` 可选（默认 1000，上限 10000）：时间桶数 = 期望点数，步长 = 总时长/桶数（向上取整，最小 1s）
   - 返回：`[{ c_time, field1..fieldN }]`（各桶内数值列 AVG，空桶为 null；`c_time` 取桶内最大时间）
-- WebSocket：`ws://<host>:<port>/ws`（网关不校验路径，带 `/ws` 可直接连）；
+- WebSocket：`ws://<host>:<port>/api/ws`（**后端固定该路径**，与 HTTP 的 `/api` 前缀对齐；
+  其它路径的 upgrade 直接返回 HTTP 400，`?goal=` 查询参数照常可用）；
+  契约直接给出连接：`const ws = connectWebSocket(goal?)` —— **返回连接实例**
+  （`onmessage`/`send`/`close` 直接用）；地址按当前页面 `location` 拼成绝对地址
+  （`ws(s)://<host>/api/ws`），路径常量 `WS_PATH`，**不要在前端手写路径/地址**；
   服务端消息为 `{ event, data }`，`event ∈ data | alarm | direct`；
   连接后先收到欢迎消息（内含 `goal` token，用于定向补推与重连复用，前端可忽略该字段）
 
@@ -52,6 +56,11 @@
 6. 可选：接入新 `lock` 事件做「设备已锁定」提示（不改也能靠 `direct` 里的 `config_id='lock'` 兼容）
 7. 历史图表：`getChartData({ d_no, start, end, buckets })` 现已有后端实现（`/api/sensor/chart`），
    `DataChartView.vue` 可直接使用；如需其它域可传 `source: 'error' | 'control' | 'behavior'`
+8. **WebSocket 地址改为 `ws://<host>:<port>/api/ws`**（后端已固定该路径，旧的 `/ws` 不再可连）；
+   接入方式：`const ws = connectWebSocket(goal?)` —— 契约返回连接实例（`onmessage`/
+   `send`/`close` 直接用），地址由 `location` + `WS_PATH` 拼出，**不要手写路径**；
+   重连时传旧 token：`connectWebSocket(oldGoal)` → 地址带 `?goal=<旧token>`；
+   开发环境经 Vite 代理时，代理需按路径转发 ws（如 `'/api': { target, changeOrigin: true, ws: true }`）
 
 ## 升级须知（后端侧变更，部署/换库时执行）
 

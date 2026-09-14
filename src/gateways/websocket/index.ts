@@ -6,6 +6,7 @@ import { bus } from '@core/bus'
 import { Closable } from '@core/lifecycle'
 import { WsMessage } from '@/types/types'
 import { WsPush } from '@gateways/websocket'
+import { WS_PATH } from '@gateways/utils'
 import { buildWelcomeMessage, parseGoalFromUrl, serializeMessage } from './utils'
 
 const logger = log.getLogger('WebSocketServer')
@@ -36,6 +37,8 @@ export class WebSocketServer implements Closable {
   public attach(server: Server): void {
     this.wss = new WServer({
       server,
+      // 固定服务路径：只有 `${WS_PATH}`（可带 query，如 ?goal=xxx）能升级，其它路径握手被拒
+      path: WS_PATH,
       // 握手校验：URL ?goal=<旧token> 若仍被活跃连接占用，则拒绝握手
       verifyClient: (info, done) => {
         const token = parseGoalFromUrl(info.req.url)
@@ -90,7 +93,7 @@ export class WebSocketServer implements Closable {
       })
     })
 
-    logger.info('WebSocket 服务已启动')
+    logger.info(`WebSocket 服务已启动（路径 ${WS_PATH}）`)
   }
 
   /**

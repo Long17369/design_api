@@ -78,6 +78,8 @@
 - [x] MQTT 入站：连接/重连后订阅已注册主题（含启动日志）；未知主题消息 warn 忽略
 - [x] 传感器模块：`SENSOR_DATA_RAW` → 派生指标（累计流量本地累加 / `heat_rate` / `avg_flow`）→ 落库 `sensor_data` → 再分发 `SENSOR_DATA`
 - [x] WS `data` 推送（实时数据）、WS `direct` 通知（成功/失败）、WS `alarm`（告警 + 复位广播）
+- [x] WS 服务路径固定为 `/api/ws`（与 HTTP `/api` 前缀对齐）：非该路径的 upgrade 返回 HTTP 400；`?goal=` 照常可用（前端 URL 需同步加 `/api` 前缀）
+- [x] 契约导出 WS 连接接口：`connectWebSocket(goal?)` 直接返回连接实例（地址按 `location` 拼绝对地址；`goal` 用于重连复用 token）
 - [x] 预警补推：WS 连接时按 `device_locks`（type='blocked'）+ `error_msg(field3='block')` 定向补推（id 复用 `alarm_${d_no}_${c_time}` 供前端去重）
 - [x] 预警补推数据源改造：已改为按 `device_locks` 查询（不再依赖 `direct.blocked`）
 - [x] WS 定向推送 `goal` 与重连复用、`WS_CLIENT_CONNECTED` / `WS_MESSAGE_IN` 事件

@@ -14,7 +14,51 @@ import {
   DataSourceName,
 } from './types'
 
-const BASE_URL = '/api'
+/**
+ * 对外接口前缀 + WebSocket 服务路径。
+ *
+ * `src/types/` 是**自包含的对外契约**：本目录内不允许任何外部引用，故这里的字面量
+ * 必须与后端 `src/gateways/utils.ts::API_BASE` / `WS_PATH` 保持一致
+ * （`tests/core/wsUrl.test.ts` 断言两者相等，改前缀请同时改这两处）。
+ */
+const API_BASE = '/api'
+
+/** WebSocket 服务路径（后端网关锁定该路径，非该路径的 upgrade 返回 400） */
+export const WS_PATH = `${API_BASE}/ws`
+
+/**
+ * 建立 WebSocket 连接，**返回连接实例本身**：`send()` / `close()` / `readyState` /
+ * `onmessage` / `onopen` / `onclose` / `onerror` 直接用；重连与心跳策略由调用方决定。
+ *
+ * 连接地址 = 当前页面源 + `WS_PATH`（WebSocket 构造要求**绝对地址**，相对路径会抛
+ * `Invalid URL`，所以这里用 `location` 拼成 `ws(s)://<host>[:端口]/api/ws`）。
+ *
+ * @param goal 可选：重连时复用旧 token（后端据此复用同一连接身份）
+ *
+ * @example
+ * const ws = connectWebSocket()             // ws://<当前页面主机>/api/ws
+ * ws.onmessage = (e) => console.log(e.data)
+ *
+ * const resumed = connectWebSocket(oldGoal) // ws://<当前页面主机>/api/ws?goal=<旧token>
+ */
+export function connectWebSocket(goal?: string): WebSocket {
+  return new WebSocket(`${wsOrigin()}${WS_PATH}${goal ? `?goal=${goal}` : ''}`)
+}
+
+/**
+ * 当前页面的绝对源（`ws://host[:port]` / `wss://host[:port]`）。
+ * 契约不引入 DOM 类型，`location` 经 `globalThis` 读；无 `location` 的环境（Node、E2E 脚本）
+ * 请先注入 `globalThis.location`（如 `{ protocol: 'http:', host: '127.0.0.1:10452' }`）。
+ */
+function wsOrigin(): string {
+  const location = (globalThis as { location?: { protocol?: string; host?: string } }).location
+  if (!location?.host) {
+    throw new Error(
+      'connectWebSocket: 当前环境没有 location，无法确定主机；请注入 globalThis.location 或直接用 WS_PATH 拼地址',
+    )
+  }
+  return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`
+}
 
 /** 旧命名重定向表：'data' 暂指向 'sensor' */
 const SOURCE_ALIAS: Record<string, DataSourceName> = {
@@ -46,7 +90,7 @@ async function fetchApi<T>(url: string, options?: FetchOptions): Promise<T> {
  * @returns Promise<FieldMapper[]>
  */
 export async function getDataMapper(source: string): Promise<FieldMapper[]> {
-  return fetchApi<FieldMapper[]>(`${BASE_URL}/${resolveSource(source)}/table`)
+  return fetchApi<FieldMapper[]>(`${API_BASE}/${resolveSource(source)}/table`)
 }
 
 /**
@@ -67,7 +111,7 @@ export async function getData(
     desc: desc.toString(),
     where: JSON.stringify(where),
   })
-  return fetchApi<Data[]>(`${BASE_URL}/${resolveSource(source)}/data?${queryString}`)
+  return fetchApi<Data[]>(`${API_BASE}/${resolveSource(source)}/data?${queryString}`)
 }
 
 /**
@@ -80,7 +124,7 @@ export async function getCount(source: string, where: Where = {}): Promise<DataC
   const queryString = new URLSearchParams({
     where: JSON.stringify(where),
   })
-  return fetchApi<DataCount>(`${BASE_URL}/${resolveSource(source)}/count?${queryString}`)
+  return fetchApi<DataCount>(`${API_BASE}/${resolveSource(source)}/count?${queryString}`)
 }
 
 /**
@@ -97,7 +141,7 @@ export async function getTimeRange(
     where: JSON.stringify(where),
   })
   return fetchApi<{ minTime: string; maxTime: string }>(
-    `${BASE_URL}/${resolveSource(source)}/time-range?${queryString}`,
+    `${API_BASE}/${resolveSource(source)}/time-range?${queryString}`,
   )
 }
 
@@ -118,7 +162,7 @@ export const getChartData = (params: ChartQueryParams): Promise<ChartPoint[]> =>
     buckets: String(params.buckets ?? 1000),
   }).toString()
   return fetchApi<ChartPoint[]>(
-    `${BASE_URL}/${resolveSource(params.source ?? 'sensor')}/chart?${queryString}`,
+    `${API_BASE}/${resolveSource(params.source ?? 'sensor')}/chart?${queryString}`,
   )
 }
 
@@ -127,7 +171,7 @@ export const getChartData = (params: ChartQueryParams): Promise<ChartPoint[]> =>
  * 暂返回 sensor 域（sensor_data）中有上报数据的设备。
  */
 export const getDataDevices = () => {
-  return fetchApi<string[]>(`${BASE_URL}/sensor/devices`)
+  return fetchApi<string[]>(`${API_BASE}/sensor/devices`)
 }
 
 /**
@@ -135,7 +179,7 @@ export const getDataDevices = () => {
  * @param d_no 设备编号 (可选)
  */
 export const fetchDirectConfig = () => {
-  return fetchApi<DirectConfig[]>(`${BASE_URL}/direct/config`)
+  return fetchApi<DirectConfig[]>(`${API_BASE}/direct/config`)
 }
 
 /**
@@ -143,7 +187,7 @@ export const fetchDirectConfig = () => {
  * @param d_no 设备编号
  */
 export const fetchDirectData = (d_no: string) => {
-  return fetchApi<Direct[]>(`${BASE_URL}/direct/data?d_no=${d_no}`)
+  return fetchApi<Direct[]>(`${API_BASE}/direct/data?d_no=${d_no}`)
 }
 
 /**
@@ -151,7 +195,7 @@ export const fetchDirectData = (d_no: string) => {
  * @param data 更新参数
  */
 export const updateDirectData = (data: UpdateDirectParams) => {
-  return fetchApi(`${BASE_URL}/direct/update`, {
+  return fetchApi(`${API_BASE}/direct/update`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -170,7 +214,7 @@ export const sendControlCommand = (
   action: 'on' | 'off',
   d_no: string,
 ) => {
-  return fetchApi<{ message: string }>(`${BASE_URL}/control`, {
+  return fetchApi<{ message: string }>(`${API_BASE}/control`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ target, action, d_no }),
@@ -182,7 +226,7 @@ export const sendControlCommand = (
  * @param d_no 设备编号
  */
 export const resetDeviceBlock = (d_no: string) => {
-  return fetchApi<{ message: string }>(`${BASE_URL}/control/reset`, {
+  return fetchApi<{ message: string }>(`${API_BASE}/control/reset`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ d_no }),
