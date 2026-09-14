@@ -48,6 +48,7 @@ export function buildAutoConfig(
     overpressureAutoRelease: pick('overpressure_auto_release') === '1',
     overpressureOnRelease: pick('overpressure_on_release') === 'resume' ? 'resume' : 'hold',
     flowRateZero: numOr('flow_rate_zero', 0.01),
+    pumpIdleSeconds: numOr('pump_idle_seconds', 60),
     pumpStartGrace: numOr('pump_start_grace', 10),
     flowUnchangedSeconds: numOr('flow_unchanged_seconds', 15),
     temp1RiseCount: numOr('temp1_rise_count', 3),
