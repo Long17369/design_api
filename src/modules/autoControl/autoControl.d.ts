@@ -71,6 +71,8 @@ declare module '@modules/autoControl' {
     flowUnchangedSeconds: number
     /** 设备离线判定秒数：超过该时长未上报即告警（5s 定时器扫描）；0 = 关闭该告警 */
     sensorOfflineSeconds: number
+    /** 状态同步帧数：设备上报值与指令值连续 N 帧不一致即同步（以设备为准）；0 = 关闭 */
+    deviceSyncFrames: number
     /** 温度异常判定：升温1 连续上升次数 */
     temp1RiseCount: number
     /** 温度异常判定：升温2 允许波动(°C) */
@@ -101,6 +103,16 @@ declare module '@modules/autoControl' {
     offline: boolean
     /** 最近一次该设备的指令值快照（用于取其设备级离线阈值） */
     values: Map<string, string>
+  }
+
+  /** 设备状态同步追踪（连续 N 帧指令与上报不一致才同步） */
+  interface DeviceSyncState {
+    /** 上次比较过的指令值（指令变化即重新计数，避免刚下发就被同步回去） */
+    heat: string | null
+    water: string | null
+    /** 连续不一致帧数 */
+    heatCount: number
+    waterCount: number
   }
 
   /** 单设备运行状态（仅引擎级状态；组件私有计时/激活态由各组件自持） */
