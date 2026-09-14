@@ -9,12 +9,12 @@ import { DirectModule } from '@modules/directModule'
 import { WsData } from '@/types/types'
 import { AutoConfig, AutoCtx, AutoDecision, DeviceState } from '@modules/autoControl'
 import { autoComponents } from './components'
-import { loadAutoConfig, pushHistory, sendAlarm, setControl } from './utils'
+import { buildAutoConfig, loadConfigDefaults, pushHistory, sendAlarm, setControl } from './utils'
 
 const logger = log.getLogger('AutoControlModule')
 
-/** 阈值配置缓存 key（tag = direct_config，写库时自动失效） */
-const CONFIG_CACHE_KEY = 'autoControl:config'
+/** 阈值配置默认值缓存 key（tag = direct_config，写库时自动失效） */
+const CONFIG_DEFAULTS_KEY = 'autoControl:configDefaults'
 
 /** 设备历史帧最大数量（温度异常等跨帧判定用） */
 const MAX_HISTORY = 10
@@ -96,7 +96,7 @@ export class AutoControlModule implements Closable {
     }
     state.blocked = false
 
-    const cfg = await this.loadConfig(db)
+    const cfg = await this.loadConfig(db, values)
     const now = Date.now()
     this.trackPump(state, data, now)
     pushHistory(state.history, data, MAX_HISTORY)
@@ -222,8 +222,17 @@ export class AutoControlModule implements Closable {
     return state.pumpStartedAt !== null && now - state.pumpStartedAt < cfg.pumpStartGrace * 1000
   }
 
-  /** 读取阈值配置（@core/cache，tag=direct_config，写库后自动失效） */
-  private loadConfig(db: Database): Promise<AutoConfig> {
-    return cache.remember(CONFIG_CACHE_KEY, () => loadAutoConfig(db), { tag: 'direct_config' })
+  /**
+   * 读取该设备生效的阈值配置：默认值走缓存（写穿透失效），设备级 `direct` 值逐帧合并覆盖。
+   * 因此前端按设备改配置对自动控制立即生效，无需等服务进程重启。
+   */
+  private async loadConfig(
+    db: Database,
+    overrides: ReadonlyMap<string, string>,
+  ): Promise<AutoConfig> {
+    const defaults = await cache.remember(CONFIG_DEFAULTS_KEY, () => loadConfigDefaults(db), {
+      tag: 'direct_config',
+    })
+    return buildAutoConfig(defaults, overrides)
   }
 }
