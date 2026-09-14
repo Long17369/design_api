@@ -121,14 +121,57 @@ describe('PID 控温（PWM）', () => {
     expect(third?.controls).toEqual([{ target: 'heat', value: '1' }])
   })
 
-  it('积分项限幅（防 windup）：持续偏差 duty 仍不超过 1', () => {
-    const cfg = { ...CFG, pidKp: 0.01, pidKi: 1, pidCycle: 10 }
-    let decision = null
-    for (let i = 0; i < 20; i++) {
-      decision = pidTempComponent.evaluate(
-        ctx('10', 4_000_000 + i * 1000, { heat: '1', water: '1' }, cfg),
-      )
+  it('积分项按「等效输出」限幅：持续偏差也不会让积分单项顶满输出', () => {
+    // Kp=0 → 输出完全由积分决定；Ki=1、误差 10 → 若不限幅，积分很快把 duty 顶到 1
+    const cfg = { ...CFG, pidKp: 0, pidKi: 1, pidKd: 0, pidCycle: 10 }
+    const t0 = 4_000_000
+    // 首帧只建立时间基准（dt=0）→ 不动
+    pidTempComponent.evaluate(ctx('20', t0, { heat: '0', water: '1' }, cfg))
+    // 误差已积分 → duty = Ki·∫ ≤ 0.2 → 周期前 2s 内应开加热
+    const on = pidTempComponent.evaluate(ctx('20', t0 + 1000, { heat: '0', water: '1' }, cfg))
+    expect(on?.controls).toEqual([{ target: 'heat', value: '1' }])
+    // 第 5s 已超出 2s 窗口 → 关加热（若积分不限幅，duty 早已顶到 1，这里仍是开）
+    const off = pidTempComponent.evaluate(ctx('20', t0 + 5000, { heat: '1', water: '1' }, cfg))
+    expect(off?.controls).toEqual([{ target: 'heat', value: '0' }])
+  })
+
+  it('升温段积满积分后，过冲瞬间必须关加热（修「升温段污染稳定段」）', () => {
+    const cfg = { ...CFG, pidTarget: 40, pidKp: 4, pidKi: 0.02, pidKd: 0, pidCycle: 10 }
+    let t = 4_100_000
+    // 升温段：实测 30（误差 +10）持续 10 分钟，每秒一帧
+    for (let i = 0; i < 600; i++) {
+      t += 1000
+      pidTempComponent.evaluate(ctx('30', t, { heat: '1', water: '1' }, cfg))
     }
-    expect(decision).toBeNull() // duty 已饱和为 1 → 保持开，无新下发
+    // 过冲：实测 40.2（误差 −0.2）→ 必须立刻关加热，不能维持 10~20% 输出把温度钉在 40.2
+    const off = pidTempComponent.evaluate(ctx('40.2', t + 1000, { heat: '1', water: '1' }, cfg))
+    expect(off?.controls).toEqual([{ target: 'heat', value: '0' }])
+  })
+
+  it('输出饱和期间不累积积分（条件积分），大误差结束后无残留', () => {
+    const cfg = { ...CFG, pidTarget: 40, pidKp: 4, pidKi: 0.02, pidKd: 0, pidCycle: 10 }
+    let t = 4_200_000
+    // 远低于目标（误差 +20）持续 5 分钟：比例项已把输出推满 → 不应再积分
+    for (let i = 0; i < 300; i++) {
+      t += 1000
+      pidTempComponent.evaluate(ctx('20', t, { heat: '1', water: '1' }, cfg))
+    }
+    // 刚到目标（误差 0）→ duty 应为 0，而不是靠积分残留继续开
+    const off = pidTempComponent.evaluate(ctx('40', t + 1000, { heat: '1', water: '1' }, cfg))
+    expect(off?.controls).toEqual([{ target: 'heat', value: '0' }])
+  })
+
+  it('目标变化时丢弃旧积分（换目标不带着上一段残留）', () => {
+    // 第一段：目标 30、实测 40 → 误差 −10（持续输出 0，积分不会被积起来）
+    let t = 4_300_000
+    const low = { ...CFG, pidTarget: 30, pidKp: 4, pidKi: 0.02, pidKd: 0, pidCycle: 10 }
+    for (let i = 0; i < 30; i++) {
+      t += 1000
+      pidTempComponent.evaluate(ctx('40', t, { heat: '0', water: '1' }, low))
+    }
+    // 目标改为 40、实测仍 40 → 误差 0 → 输出 0（不因旧积分而开加热）
+    const high = { ...CFG, pidTarget: 40, pidKp: 4, pidKi: 0.02, pidKd: 0, pidCycle: 10 }
+    const decision = pidTempComponent.evaluate(ctx('40', t + 1000, { heat: '1', water: '1' }, high))
+    expect(decision?.controls).toEqual([{ target: 'heat', value: '0' }])
   })
 })
