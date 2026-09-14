@@ -18,6 +18,7 @@
 | `tests/autoControl/pidTemp.test.ts`    | PID：未启用/防干烧/缺测/占空比开关/积分限幅饱和/抗积分饱和（升温段不污染稳定段）/时间量纲与 PWM 最小导通 |
 | `tests/autoControl/alarm.test.ts`      | `sendAlarm` 分类/类型/颜色透传、时间归一化（UTC 字面量）、堵塞补推组装                                          |
 | `tests/sensorModule/spike.test.ts`     | 跳变阈值边界、关闭字段、缺测不误判                                                                              |
+| `tests/sensorModule/offline.test.ts`   | 离线哨兵值（0xFFFF/10 = 6553.5）剔除：温度/压力/流量、字符串与数字形态、邻近正常值不动                          |
 | `tests/core/cache.test.ts`             | KV/TTL/标签失效/`remember` 只加载一次                                                                           |
 | `tests/core/chart.test.ts`             | 桶步长边界（向上取整/最小 1s）、SQL 结构与参数顺序、客户端 URL 与别名                                           |
 | `tests/core/wsUrl.test.ts`             | WS 契约接口：`WS_PATH` 与后端路径一致、`connectWebSocket` 返回连接实例（含 `location` 拼地址/无 location 报错） |
@@ -47,7 +48,7 @@ pnpm exec tsx tests/e2e/verify_seeds.ts               # seeds 等价性（只需
 | `temp_limit.mjs` / `pump_heat.mjs` / `pump_idle.mjs` / `overpressure.mjs` / `reverse_temp.mjs` / `pid_temp.mjs` | 各保护组件（恒温、关泵连带关加热、空转去抖、过压冷却期、逆温差、PID PWM）         |
 | `flow_target.mjs` / `flow_resume.mjs`                                                                           | 累计流量目标、累计流量重启续算（两阶段）                                          |
 | `device_override.mjs`                                                                                           | 设备级配置覆盖优先级（前端改配置立即生效）                                        |
-| `device_sync.mjs` / `sensor_offline.mjs` / `sensor_spike.mjs`                                                   | 设备状态回写、离线告警、跳变标记                                                  |
+| `device_sync.mjs` / `sensor_offline.mjs` / `sensor_spike.mjs`                                                   | 设备状态回写、离线告警（含哨兵值 6553.5 按缺测不入库）、跳变标记                  |
 | `ws_push.mjs`                                                                                                   | WS 定向推送与重连（`goal`）                                                       |
 | `chart.mjs`                                                                                                     | 历史图表降采样接口                                                                |
 | `config_hierarchy.mjs`                                                                                          | 配置项层级门控（`GET /api/direct/config?d_no=`）                                  |
