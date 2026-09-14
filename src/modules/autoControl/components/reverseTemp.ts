@@ -8,6 +8,15 @@ const ALARM: AlarmDef = {
   message: '逆温差异常：出水温度低于进水',
 }
 
+/** 逆温差**解除**告警：状态切换（温差恢复 / 停止加热）时推送一次，前端据此清横幅 */
+const RELEASE_ALARM: AlarmDef = {
+  code: 'reverse_temp_release',
+  level: 'warning',
+  message: '逆温差已恢复',
+  type: 'reset',
+  category: 'release',
+}
+
 /** 组件内部状态（按设备自持）：记录连续逆温差的起始时刻与是否已告警 */
 interface ReverseState {
   /** 连续逆温差起始时刻(ms)，恢复正常即清除 */
@@ -62,11 +71,23 @@ export const reverseTempComponent: AutoComponent = {
     const outlet = toNum(ctx.data.wen_du2)
     const heating = values.get('heat') === '1'
 
-    // 数据缺测 或 非加热状态 或 未构成逆温差 → 恢复正常，重置状态
-    if (inlet === null || outlet === null || !heating || outlet >= inlet - cfg.reverseTempDelta) {
+    // 数据缺测 → 静默重置（不判「已恢复」）
+    if (inlet === null || outlet === null) {
       state.since = null
       state.alerted = false
       return null
+    }
+    // 温差恢复正常 或 已停止加热 → 解除；此前已告警则补一条解除推送
+    if (!heating || outlet >= inlet - cfg.reverseTempDelta) {
+      const wasAlerted = state.alerted
+      state.since = null
+      state.alerted = false
+      return wasAlerted
+        ? {
+            reason: `逆温差已恢复：出水 ${outlet} / 进水 ${inlet}，加热=${heating}`,
+            alarm: RELEASE_ALARM,
+          }
+        : null
     }
 
     if (state.since === null) {

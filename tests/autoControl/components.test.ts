@@ -168,6 +168,77 @@ describe('累计流量不变（堵塞保护）', () => {
   })
 })
 
+describe('告警边沿推送（仅状态切换时推一次）', () => {
+  it('堵塞类：首次命中带告警、持续期间不重复推（以 blocked 锁为已推送标志）', () => {
+    const dNo = 'D_EDGE1'
+    lockManager.releaseAll(dNo)
+    const at = () => ctx({ pressure: '0' }, { dNo })
+
+    const first = pressureZeroComponent.evaluate(at())
+    expect(first?.alarm?.code).toBe('pressure_zero')
+    expect(first?.block).toBe(true)
+
+    // 引擎命中后会加 blocked 锁（此处手工模拟）→ 后续帧不再重复推送，但仍维持堵塞态
+    lockManager.acquire({ type: 'blocked', d_no: dNo, deny: { water: true }, reason: '堵塞' })
+    const second = pressureZeroComponent.evaluate(at())
+    expect(second?.alarm).toBeUndefined()
+    expect(second?.block).toBe(true)
+
+    // 复位（释放锁）后再次命中 → 可再次推送
+    lockManager.releaseAll(dNo)
+    expect(pressureZeroComponent.evaluate(at())?.alarm?.code).toBe('pressure_zero')
+    lockManager.releaseAll(dNo)
+  })
+
+  it('水泵空转：流量恢复时推一条解除（type=reset / category=release），且不重复', () => {
+    const dNo = 'D_EDGE2'
+    flowZeroComponent.clearState?.(dNo)
+    const cfg = { ...CFG, pumpIdleSeconds: 3 }
+    const idle = (now: number) =>
+      ctx({ liu_liang2: '0', shui_beng: '1' }, { now, cfg, dNo, values: { water: '1' } })
+    const running = (now: number) =>
+      ctx({ liu_liang2: '5', shui_beng: '1' }, { now, cfg, dNo, values: { water: '1' } })
+
+    expect(flowZeroComponent.evaluate(idle(1000))).toBeNull()
+    expect(flowZeroComponent.evaluate(idle(5000))?.alarm?.code).toBe('pump_idle')
+
+    const release = flowZeroComponent.evaluate(running(8000))
+    expect(release?.alarm?.code).toBe('pump_idle_release')
+    expect(release?.alarm?.type).toBe('reset')
+    expect(release?.alarm?.category).toBe('release')
+    expect(release?.alarm?.level).toBe('warning')
+    // 已恢复正常 → 不重复推解除
+    expect(flowZeroComponent.evaluate(running(9000))).toBeNull()
+    flowZeroComponent.clearState?.(dNo)
+  })
+
+  it('逆温差：温差恢复时推一条解除；缺测只静默重置', () => {
+    const dNo = 'D_EDGE3'
+    reverseTempComponent.clearState?.(dNo)
+    const cfg = { ...CFG, reverseTempSeconds: 5, reverseTempDelta: 2 }
+    const reverse = (now: number) =>
+      ctx({ wen_du1: '30', wen_du2: '20' }, { now, cfg, dNo, values: { heat: '1' } })
+
+    expect(reverseTempComponent.evaluate(reverse(1000))).toBeNull()
+    expect(reverseTempComponent.evaluate(reverse(7000))?.alarm?.code).toBe('reverse_temp')
+
+    // 缺测 → 静默重置（不判已恢复、不推解除）
+    expect(
+      reverseTempComponent.evaluate(ctx({ wen_du1: '', wen_du2: '' }, { now: 8000, cfg, dNo })),
+    ).toBeNull()
+
+    // 再次触发后温差恢复 → 推解除
+    expect(reverseTempComponent.evaluate(reverse(9000))).toBeNull()
+    expect(reverseTempComponent.evaluate(reverse(15_000))?.alarm?.code).toBe('reverse_temp')
+    const release = reverseTempComponent.evaluate(
+      ctx({ wen_du1: '30', wen_du2: '30' }, { now: 16_000, cfg, dNo, values: { heat: '1' } }),
+    )
+    expect(release?.alarm?.code).toBe('reverse_temp_release')
+    expect(release?.alarm?.type).toBe('reset')
+    reverseTempComponent.clearState?.(dNo)
+  })
+})
+
 describe('温度异常（堵塞保护）', () => {
   it('升温1 连续上升且升温2 稳定 → 判定异常', () => {
     const state = newState()

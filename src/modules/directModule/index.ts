@@ -249,13 +249,22 @@ export class DirectModule implements Closable {
     }
     lockManager.clearSnapshot(d_no)
 
-    // 3. 广播复位事件（无 goal → 广播给所有客户端）
+    // 3. 解除告警：写 error_msg（category=release，不参与堵塞预警补推）+ 广播 reset 事件（前端清横幅）
     const cTime = formatNow()
+    await db.insert('error_msg', {
+      d_no,
+      c_time: cTime,
+      field1: '堵塞已复位（手动）',
+      field2: 'block_release',
+      field3: 'release',
+    })
     const data: WsAlarm = {
       id: `reset_${d_no}_${cTime}`,
       d_no,
       type: 'reset',
       message: '堵塞已复位',
+      code: 'block_release',
+      level: 'warning',
       timestamp: cTime,
     }
     bus.emitEvent('WS_MESSAGE_OUT', { message: { event: 'alarm', data } })

@@ -1,3 +1,4 @@
+import { lockManager } from '@core/locks'
 import { AlarmDef, AutoComponent, AutoCtx, AutoDecision } from '@modules/autoControl'
 import { toNum } from '../utils'
 
@@ -68,9 +69,11 @@ export const flowUnchangedComponent: AutoComponent = {
 
     if (now - state.since < cfg.flowUnchangedSeconds * 1000) return null
 
+    // 告警边沿：已有 blocked 锁 ⇒ 本设备本次堵塞已推送过（复位后可再次推送）
+    const firstAlarm = lockManager.get(ctx.d_no, 'blocked') === undefined
     return {
       reason: `水管堵塞：累计流量无变化(${total} 持续 ${cfg.flowUnchangedSeconds}s)`,
-      alarm: ALARM,
+      ...(firstAlarm ? { alarm: ALARM } : {}),
       controls: [
         { target: 'heat', value: '0' },
         { target: 'water', value: '0' },
