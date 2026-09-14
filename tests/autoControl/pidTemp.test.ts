@@ -187,4 +187,43 @@ describe('PID 控温（PWM）', () => {
     const decision = pidTempComponent.evaluate(ctx('40', t + 1000, { heat: '1', water: '1' }, high))
     expect(decision?.controls).toEqual([{ target: 'heat', value: '0' }])
   })
+
+  it('占空比低于最小导通时间 → 整个周期都不开加热（修「0% 却开加热」）', () => {
+    // e=10、Kp=0.0004 → duty=0.004（10s 周期只该导通 0.04s）
+    const cfg = { ...CFG, pidKp: 0.0004, pidKi: 0, pidKd: 0, pidCycle: 10 }
+    const t0 = 4_500_000
+    // 若此刻正在加热（上一周期残留），必须立刻关掉
+    expect(
+      pidTempComponent.evaluate(ctx('20', t0, { heat: '1', water: '1' }, cfg))?.controls,
+    ).toEqual([{ target: 'heat', value: '0' }])
+    // 整个周期（10 帧）都不应开加热；旧实现 `elapsed < duty×cycle` 在周期起点为真 → 会导通整帧
+    for (let i = 1; i <= 10; i++) {
+      expect(
+        pidTempComponent.evaluate(ctx('20', t0 + i * 1000, { heat: '0', water: '1' }, cfg)),
+      ).toBeNull()
+    }
+  })
+
+  it('最小关断时间：本周期导通量用完后不再开（避免整数秒抖动反复开关）', () => {
+    // duty=0.15 → 10s 周期只需导通 1.5s；按 1s 帧采样，导通 1 帧后剩余 0.5s < 1s → 关
+    const cfg = { ...CFG, pidKp: 0.015, pidKi: 0, pidKd: 0, pidCycle: 10 } // e=10 → duty=0.15
+    const t0 = 4_600_000
+    expect(
+      pidTempComponent.evaluate(ctx('20', t0, { heat: '0', water: '1' }, cfg))?.controls,
+    ).toEqual([{ target: 'heat', value: '1' }])
+    expect(
+      pidTempComponent.evaluate(ctx('20', t0 + 1000, { heat: '1', water: '1' }, cfg))?.controls,
+    ).toEqual([{ target: 'heat', value: '0' }])
+    // 关掉之后本周期（到 10s）都不再开
+    expect(
+      pidTempComponent.evaluate(ctx('20', t0 + 2000, { heat: '0', water: '1' }, cfg)),
+    ).toBeNull()
+    expect(
+      pidTempComponent.evaluate(ctx('20', t0 + 9000, { heat: '0', water: '1' }, cfg)),
+    ).toBeNull()
+    // 新周期 → 重新导通
+    expect(
+      pidTempComponent.evaluate(ctx('20', t0 + 10_500, { heat: '0', water: '1' }, cfg))?.controls,
+    ).toEqual([{ target: 'heat', value: '1' }])
+  })
 })

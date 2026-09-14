@@ -11,6 +11,8 @@ interface PidState {
   lastAt: number | null
   /** 当前 PWM 周期起始时刻(ms) */
   cycleStart: number | null
+  /** 当前 PWM 周期内**已导通**时长(秒) */
+  onSec: number
   /** 上次生效的目标温度（目标变化时据此清积分） */
   target: number | null
 }
@@ -33,10 +35,17 @@ const DUTY_MAX = 1
 const DT_MIN_SEC = 0.2
 const DT_MAX_SEC = 10
 
+/**
+ * 最小导通时间（秒）：本周期还差不足 1 s 的导通量就不开加热。
+ * 帧采样（约 1 s）下若不设下限，任意小的 `duty` 都会在周期起点导通整帧
+ * —— 实测出现过「占空比 0.4%（显示 0%）却开加热」，而一帧满功率 ≈ 7~9 s 的散热量。
+ */
+const MIN_ON_SEC = 1
+
 function stateOf(dNo: string): PidState {
   let state = states.get(dNo)
   if (!state) {
-    state = { integral: 0, lastError: null, lastAt: null, cycleStart: null, target: null }
+    state = { integral: 0, lastError: null, lastAt: null, cycleStart: null, onSec: 0, target: null }
     states.set(dNo, state)
   }
   return state
@@ -48,6 +57,7 @@ function reset(state: PidState): void {
   state.lastError = null
   state.lastAt = null
   state.cycleStart = null
+  state.onSec = 0
   state.target = null
 }
 
@@ -65,8 +75,11 @@ function reset(state: PidState): void {
  *   ② 目标变化、以及**过冲**（误差由正转负）时**清积分**；
  *   ③ 积分项按**等效输出**限幅（`Ki·∫ ≤ 20%`），单项不可能顶满输出。
  *   否则升温段会把积分灌满，到温后「该减输出时减不下来」——温度会在目标之上停很久
- * - **PWM**：每个 `pid_cycle` 秒为一个周期，周期内前 `duty × cycle` 秒开加热，其余关加热；
- *   因此每个周期最多开关各一次（下发次数有界，符合设备下发频率限制）
+ * - **PWM**：每个 `pid_cycle` 秒为一个周期，周期内累计导通 `duty × cycle` 秒（先开后关）、其余关加热；
+ *   按**实际导通时长**累计而不是按时间点判断 —— 帧采样下「时间点判断」会让任意小的 duty
+ *   都在周期起点导通整帧（实测「占空比 0.4% 却开加热」，一帧满功率 ≈ 7~9 s 的散热量）；
+ *   并设最小导通时间 `MIN_ON_SEC`；`onSec` 只增不减 ⇒ 一旦关掉本周期不会再开
+ *   ⇒ 天然满足最小关断时间，每个周期最多开关各一次（下发次数有界，符合设备下发频率限制）
  * - **防干烧**：水泵未运行（指令值非 1）时不输出，并重置 PID 状态
  * - **安全优先**：本组件（priority 75）排在恒温保护（80）之前，超温等安全判定仍会覆盖其输出
  * - 幂等：只在「期望开关状态 ≠ 当前 direct heat 值」时下发
@@ -136,18 +149,23 @@ export const pidTempComponent: AutoComponent = {
 
     const duty = Math.max(DUTY_MIN, Math.min(DUTY_MAX, p + cfg.pidKi * state.integral + d))
 
-    // ---------- PWM：周期内按占空比开关 ----------
+    // ---------- PWM：周期内按占空比累计导通（带最小导通时间） ----------
     const cycleMs = cfg.pidCycle * 1000
     if (state.cycleStart === null || now - state.cycleStart >= cycleMs) {
       state.cycleStart = now
+      state.onSec = 0
     }
-    const elapsed = now - (state.cycleStart ?? now)
-    const desiredOn = elapsed < duty * cycleMs
+    // 按**实际**导通时长累计（读设备当前值：被安全逻辑关掉也能自愈）
+    if (values.get('heat') === '1' && dtSec > 0) {
+      state.onSec = Math.min(cfg.pidCycle, state.onSec + dtSec)
+    }
+    // 满输出常开（升温/安全兜底不做斩波）；其余看本周期还差多少导通量
+    const desiredOn = duty >= DUTY_MAX || duty * cfg.pidCycle - state.onSec >= MIN_ON_SEC
     const desired = desiredOn ? '1' : '0'
     if (values.get('heat') === desired) return null
 
     return {
-      reason: `PID 控温：目标 ${cfg.pidTarget}，实测 ${measured}，占空比 ${(duty * 100).toFixed(0)}%（${desiredOn ? '开' : '关'}加热）`,
+      reason: `PID 控温：目标 ${cfg.pidTarget}，实测 ${measured}，占空比 ${(duty * 100).toFixed(1)}%（${desiredOn ? '开' : '关'}加热）`,
       controls: [{ target: 'heat', value: desired as '0' | '1' }],
     }
   },
