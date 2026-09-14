@@ -168,6 +168,51 @@ describe('累计流量不变（堵塞保护）', () => {
   })
 })
 
+describe('缺测（空值）时各组件一律不动作', () => {
+  // 传感器离线哨兵值会被置空串 ⇒ 所有测量字段都可能是 ''（= 缺测），
+  // 组件必须按「数据不足」跳过判定，不能把 0/NaN 当真实值去动作或加锁。
+  const emptyFrame = () =>
+    frame({
+      wen_du1: '',
+      wen_du2: '',
+      pressure: '',
+      liu_liang1: '',
+      liu_liang2: '',
+      heat_rate: '',
+      avg_flow: '',
+    })
+
+  const components = [
+    ['pressureZero', pressureZeroComponent],
+    ['flowZero', flowZeroComponent],
+    ['flowUnchanged', flowUnchangedComponent],
+    ['reverseTemp', reverseTempComponent],
+    ['tempLimit', tempLimitComponent],
+    ['highPressure', highPressureComponent],
+    ['flowTarget', flowTargetComponent],
+  ] as const
+
+  for (const [name, component] of components) {
+    it(`${name}：全字段缺测 → 不下发任何决策`, () => {
+      const dNo = `D_EMPTY_${name}`
+      component.clearState?.(dNo)
+      lockManager.releaseAll(dNo)
+      const decision = component.evaluate(
+        ctx(emptyFrame(), { dNo, values: { heat: '1', water: '1' } }),
+      )
+      expect(decision).toBeNull()
+      component.clearState?.(dNo)
+      lockManager.releaseAll(dNo)
+    })
+  }
+
+  it('缺测不误判温度异常（历史帧全空）', () => {
+    const state = newState()
+    state.history = [frame({ wen_du1: '', wen_du2: '' }), frame({ wen_du1: '', wen_du2: '' })]
+    expect(isTempAnomaly(state, CFG)).toBe(false)
+  })
+})
+
 describe('告警边沿推送（仅状态切换时推一次）', () => {
   it('堵塞类：首次命中带告警、持续期间不重复推（以 blocked 锁为已推送标志）', () => {
     const dNo = 'D_EDGE1'
