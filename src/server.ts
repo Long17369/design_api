@@ -1,0 +1,114 @@
+import { bus } from '@core/bus'
+import { Config } from '@core/config'
+import { Database } from '@core/database'
+import { log } from '@core/logger'
+import { HttpServer, MqttGateway, WebSocketServer } from '@gateways'
+import { AlarmModule, AutoControlModule, DirectModule, LockModule, SensorModule } from '@modules'
+
+const logger = log.getLogger('Server')
+
+/**
+ * 服务编排器：装配并启动全部运行期组件（配置 / 数据库 / 网关 / 模块）。
+ *
+ * 只负责「装配 → 启动 → 触发关停」这三件服务内的事；进程级职责
+ * （信号监听、兜底强退）留在 CLI 入口 `main.ts`。
+ *
+ * - `new Server(configPath)`：配置路径由调用方（CLI 入口）给出；
+ * - `start()`：按依赖顺序装配 `Config` → `Database` → 网关（MQTT / HTTP / WS）→ 模块，
+ *   并开始监听端口；重复调用直接忽略；
+ * - `stop(reason)`：广播 `shutdown` 事件，各组件（构造时订阅）自行 `close()` 释放资源。
+ */
+export class Server {
+  private readonly configPath: string
+  private config: Config | null = null
+  private database: Database | null = null
+  private mqtt: MqttGateway | null = null
+  private http: HttpServer | null = null
+  private webSocket: WebSocketServer | null = null
+  private directModule: DirectModule | null = null
+  private lockModule: LockModule | null = null
+  private sensorModule: SensorModule | null = null
+  private autoControl: AutoControlModule | null = null
+  private alarmModule: AlarmModule | null = null
+
+  private started = false
+  private stopped = false
+
+  /** @param configPath 配置文件路径（支持 `@root/...` 别名，如 `@root/config.json`） */
+  constructor(configPath: string) {
+    this.configPath = configPath
+  }
+
+  /** 装配并启动服务 */
+  public async start(): Promise<void> {
+    if (this.started) {
+      logger.warn('服务已启动，忽略重复的 start()')
+      return
+    }
+    this.started = true
+
+    const config = new Config(this.configPath)
+    this.config = config
+
+    // 各模块无参构造；运行期协作对象（配置/数据库/server）经 setConfig/setDatabase/attach 注入
+    const database = new Database()
+    this.database = database
+    await database.setConfig(config.database)
+
+    // 1. 启动网关（将外部协议转为 Bus 事件）
+    const mqtt = new MqttGateway()
+    this.mqtt = mqtt
+    mqtt.setConfig(config.mqtt)
+
+    const http = new HttpServer()
+    this.http = http
+    http.setDatabase(database)
+
+    const directModule = new DirectModule()
+    this.directModule = directModule
+    directModule.setDatabase(database)
+    http.setDirectModule(directModule)
+
+    const httpServer = http.bindServer()
+
+    const webSocket = new WebSocketServer()
+    this.webSocket = webSocket
+    webSocket.attach(httpServer)
+
+    httpServer.listen(config.port, () => {
+      logger.info(`HTTP Server 已启动，监听端口 ${config.port}`)
+    })
+
+    // 2. 注册所有模块（构造时订阅 bus 'shutdown' 事件）
+    // 锁定模块先注册：尽早恢复持久化锁，避免重启后保护锁尚未生效
+    const lockModule = new LockModule()
+    this.lockModule = lockModule
+    lockModule.setDatabase(database)
+
+    const sensorModule = new SensorModule()
+    this.sensorModule = sensorModule
+    sensorModule.setDatabase(database)
+
+    const autoControl = new AutoControlModule()
+    this.autoControl = autoControl
+    autoControl.setDatabase(database)
+    autoControl.setDirectModule(directModule)
+
+    const alarmModule = new AlarmModule()
+    this.alarmModule = alarmModule
+    alarmModule.setDatabase(database)
+  }
+
+  /**
+   * 触发优雅关闭：标准事件通知 —— 各模块（构造时订阅）收到 'shutdown' 后自行 close 释放资源。
+   * 兜底强退（超时 `process.exit`）由调用方（CLI 入口）负责。
+   */
+  public stop(reason = 'manual'): void {
+    if (this.stopped) {
+      return
+    }
+    this.stopped = true
+    logger.info(`正在关闭服务... (${reason})`)
+    bus.emitEvent('shutdown', { reason })
+  }
+}
