@@ -52,6 +52,30 @@ export type Data = {
   c_time: string // ISO 8601 格式
 } & Record<FieldName, string | null>
 
+/**
+ * 历史图表降采样点（时间桶 AVG）：
+ * 只含桶标签 `c_time` 与数据列（`field1..N`，键为数据表列名），值为该桶内平均值（空桶为 null）。
+ * 对应接口：`GET /api/{source}/chart?d_no&start&end&buckets`（旧契约 `/api/data/chart` 的别名见 api.ts）。
+ */
+export interface ChartPoint {
+  c_time: string
+  [column: string]: string | number | null
+}
+
+/** 图表聚合查询参数（前端） */
+export interface ChartQueryParams {
+  /** 设备编号 */
+  d_no: string
+  /** 开始时间（含）'YYYY-MM-DD HH:mm:ss' */
+  start: string
+  /** 结束时间（含） */
+  end: string
+  /** 目标桶数（降采样点数），默认 1000 */
+  buckets?: number
+  /** 数据源：sensor / behavior / error / control（默认 sensor，'data' 仍可指 sensor） */
+  source?: string
+}
+
 export interface DirectConfig {
   id: string
   ref_id: string | null // 关联的指令配置Id

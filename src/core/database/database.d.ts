@@ -1,5 +1,6 @@
 import { Database, DatabaseConfig } from '.'
 import { TableInfo, ColumnInfo, SqlValue } from './tables'
+import { Where } from '@/types/types'
 
 declare module '@core/database' {
   interface DatabaseConfig {
@@ -13,6 +14,18 @@ declare module '@core/database' {
   Database
   interface TableInfoBuilded extends TableInfo {
     columns: Map<string, ColumnInfo>
+  }
+
+  /** 图表聚合查询参数（时间桶降采样） */
+  interface ChartQueryParams {
+    /** 附加过滤条件（时间段由 start/end 决定，勿在此重复传 c_time） */
+    where?: Where
+    /** 开始时间（含）'YYYY-MM-DD HH:mm:ss' */
+    start: string
+    /** 结束时间（含） */
+    end: string
+    /** 目标桶数（降采样点数）：默认 1000，上限 10000 */
+    buckets?: number
   }
 }
 

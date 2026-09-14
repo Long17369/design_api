@@ -1,4 +1,5 @@
 import { DatabaseConfig } from '.'
+import { ChartQueryParams } from '.'
 import { log } from '@core/logger'
 import mysql from 'mysql2/promise'
 import tables, { tableTools } from './tables'
@@ -6,6 +7,7 @@ import { TableTools } from './tables/columns'
 import { SqlValue, WriteResult } from './tables'
 import {
   buildAlterAddColumnSQL,
+  buildChartSQL,
   buildCreateTableSQL,
   buildQuerySQL,
   buildTableInfoMap,
@@ -18,7 +20,7 @@ import {
 import { bus } from '@core/bus'
 import { cache } from '@core/cache'
 import { Closable } from '@core/lifecycle'
-import { DataQueryParams, Where } from '@/types/types'
+import { DataQueryParams, Where, ChartPoint } from '@/types/types'
 import { TableInfoBuilded } from '.'
 import { TABLE_SEEDS, TableSeed } from './seeds'
 
@@ -297,6 +299,23 @@ export class Database implements Closable {
     const [rows] = await this.query(sql, params)
     const row = (rows as Array<{ minTime: string | null; maxTime: string | null }>)[0]
     return { minTime: row?.minTime ?? null, maxTime: row?.maxTime ?? null }
+  }
+
+  /**
+   * 图表聚合查询：按时间桶对数据列（`fieldN`）做 AVG 降采样（桶标签取桶内最大 c_time）。
+   *
+   * 与旧实现（`mysql_node_api` 的 `getChartData`）一致：`GROUP BY FLOOR(UNIX_TIMESTAMP(c_time)/step)`，
+   * step = 总时长 / 目标桶数（向上取整，最小 1 秒）；额外支持附加过滤条件（如 d_no）。
+   *
+   * @param table 表名（白名单内的数据表）
+   * @param params 时间段 / 目标桶数 / 附加过滤条件
+   */
+  public async chart(table: string, params: ChartQueryParams): Promise<ChartPoint[]> {
+    await this.ensureReady()
+    const info = findTableInfo(this.tables, table)
+    const { sql, params: sqlParams } = buildChartSQL(info, params)
+    const [rows] = await this.query(sql, sqlParams)
+    return (rows as ChartPoint[] | undefined) ?? []
   }
 
   /**

@@ -56,6 +56,7 @@
 
 - [x] 数据读接口：`GET /api/{sensor|behavior|error|control}/{table|data|count|time-range}`
 - [x] 设备列表：`GET /api/sensor/devices`
+- [x] 历史图表：`GET /api/{sensor|behavior|error|control}/chart`（时间桶 AVG 降采样：`d_no`/`start`/`end`/`buckets`；旧契约 `/api/data/chart` 由客户端 `'data'` 别名兼容；客户端函数 `api.ts::getChartData`）
 - [x] 指令配置/数据：`GET /api/direct/config`、`GET /api/direct/data?d_no=`、`POST /api/direct/update`
 - [x] 手动控制 `POST /api/control`：`auto=1` 时拒绝手动开/关；写 direct + 下发 + WS 通知 + `control_log(manual)`
 - [x] 手动复位：`POST /api/control/reset`
