@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { stripOfflineSentinels } from '@modules/sensorModule/utils'
-import type { DataPayload } from '@/types/types'
+import {
+  accumulateFlow,
+  buildSensorRow,
+  calcAvgFlow,
+  calcHeatRate,
+  pushSample,
+  stripOfflineSentinels,
+} from '@modules/sensorModule/utils'
+import type { DeviceState } from '@modules/sensorModule'
+import type { DataPayload, FieldMapper } from '@/types/types'
 
 const frame = (over: Partial<DataPayload> = {}): DataPayload => ({
   id: 'D1',
@@ -44,5 +52,54 @@ describe('传感器离线哨兵值剔除（0xFFFF/10 = 6553.5）', () => {
     const out = stripOfflineSentinels(frame({ temp_in: '', temp_out: undefined as never }))
     expect(out.temp_in).toBe('')
     expect(out.temp_out).toBeUndefined()
+  })
+})
+
+describe('缺测（空值）不污染派生值与落库', () => {
+  const state = (): DeviceState =>
+    ({
+      totalFlow: 0,
+      lastTime: null,
+      tempSamples: [],
+      flowSamples: [],
+      lastRaw: null,
+      spikeCount: 0,
+      restored: true,
+    }) as unknown as DeviceState
+
+  it('缺测不进滑动窗口（不产生 NaN 派生值）', () => {
+    const st = state()
+    pushSample(st.tempSamples, 1000, null, 60)
+    pushSample(st.flowSamples, 1000, null, 60)
+    expect(st.tempSamples).toHaveLength(0)
+    expect(calcHeatRate(st.tempSamples, 60, 1000)).toBe('')
+    expect(calcAvgFlow(st.flowSamples, 60, 1000)).toBe('')
+  })
+
+  it('瞬时流量缺测不推进累计流量（不把 0/NaN 当真实流量）', () => {
+    const st = state()
+    // 首帧只建立时间基准
+    expect(accumulateFlow(st, null, 1000)).toBe(0)
+    // 缺测帧只推进时间基准、不累加
+    expect(accumulateFlow(st, null, 2000)).toBe(0)
+    // 60 L/min 持续 1 分钟 → 累计 +60
+    expect(accumulateFlow(st, 60, 62_000)).toBeCloseTo(60, 5)
+    // 再缺测 → 保持
+    expect(accumulateFlow(st, null, 63_000)).toBeCloseTo(60, 5)
+  })
+
+  it('落库行跳过空值（该列写 NULL）', () => {
+    const mapper: FieldMapper[] = [
+      { api_name: 'temp_in', db_name: 'field1' },
+      { api_name: 'temp_out', db_name: 'field2' },
+      { api_name: 'liu_liang1', db_name: 'field5' },
+      { api_name: 'pressure', db_name: 'field7' },
+    ] as FieldMapper[]
+    const row = buildSensorRow(
+      frame({ temp_in: '', temp_out: '40.0', pressure: undefined as never }),
+      mapper,
+      '12.5',
+    )
+    expect(row).toEqual({ field2: '40.0', field5: '12.5' })
   })
 })
