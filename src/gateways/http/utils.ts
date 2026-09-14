@@ -1,7 +1,16 @@
 import { SuccessResponse, ErrorResponse, ErrorCode, DataSourceDef } from '@gateways/http'
 import { Database } from '@core/database'
 import { DirectModule } from '@modules/directModule'
-import { Where, WhereCondition, WhereOperator } from '@/types/types'
+import {
+  Where,
+  WhereCondition,
+  WhereOperator,
+  WHERE_OPERATORS,
+  WHERE_OPERATORS_MULTI_VALUE,
+  WHERE_OPERATORS_NO_VALUE,
+  WHERE_OPERATORS_PAIR_VALUE,
+  WHERE_OPERATORS_SINGLE_VALUE,
+} from '@/types/types'
 import { Request, Response } from 'express'
 
 export const DATA_SOURCES: Record<string, DataSourceDef> = {
@@ -37,17 +46,41 @@ export class HttpError extends Error {
   }
 }
 
-const WhereOperators: WhereOperator[] = ['=', '!=', '<', '<=', '>', '>=']
+/** 操作符分组（真源在 `@/types/types`） */
+const NO_VALUE_OPERATORS = new Set<string>(WHERE_OPERATORS_NO_VALUE)
+const SINGLE_VALUE_OPERATORS = new Set<string>(WHERE_OPERATORS_SINGLE_VALUE)
+const PAIR_VALUE_OPERATORS = new Set<string>(WHERE_OPERATORS_PAIR_VALUE)
+const MULTI_VALUE_OPERATORS = new Set<string>(WHERE_OPERATORS_MULTI_VALUE)
 
+/** 非空字符串数组 */
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === 'string')
+}
+
+/** 单个条件形状校验（非法 → HttpError(400)，不会进到 SQL 层） */
 function isValidCondition(condition: unknown): condition is WhereCondition {
   if (!condition || typeof condition !== 'object') return false
   if (Array.isArray(condition)) {
-    return condition.every((cond) => isValidCondition(cond))
+    // 同一列的多个条件（不允许嵌套）
+    return (
+      condition.length > 0 &&
+      condition.every((item) => !Array.isArray(item) && isValidCondition(item))
+    )
   }
   const record = condition as Record<string, unknown>
-  if (record.operator === undefined || record.value === undefined) return false
-  if (typeof record.value !== 'string') return false
-  return WhereOperators.includes(record.operator as WhereOperator)
+  const operator = record.operator
+  if (typeof operator !== 'string' || !WHERE_OPERATORS.includes(operator as WhereOperator)) {
+    return false
+  }
+  if (NO_VALUE_OPERATORS.has(operator)) return true
+  if (PAIR_VALUE_OPERATORS.has(operator)) {
+    return isStringArray(record.value) && record.value.length === 2
+  }
+  if (SINGLE_VALUE_OPERATORS.has(operator)) return typeof record.value === 'string'
+  if (MULTI_VALUE_OPERATORS.has(operator)) {
+    return typeof record.value === 'string' || isStringArray(record.value)
+  }
+  return false
 }
 
 function isWhere(where: unknown): where is Where {

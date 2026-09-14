@@ -21,6 +21,7 @@
 | `tests/sensorModule/offline.test.ts`   | 离线哨兵值（0xFFFF/10 = 6553.5）剔除：温度/压力/流量、字符串与数字形态、邻近正常值不动                          |
 | `tests/core/cache.test.ts`             | KV/TTL/标签失效/`remember` 只加载一次                                                                           |
 | `tests/core/chart.test.ts`             | 桶步长边界（向上取整/最小 1s）、SQL 结构与参数顺序、客户端 URL 与别名                                           |
+| `tests/core/where.test.ts`             | WHERE 操作符：四组形态的 SQL 与参数（单值/集合/区间/空值）、非法值与未知操作符抛错、列白名单、分页参数顺序、`parseWhere` 400 校验 |
 | `tests/core/wsUrl.test.ts`             | WS 契约接口：`WS_PATH` 与后端路径一致、`connectWebSocket` 返回连接实例（含 `location` 拼地址/无 location 报错） |
 | `tests/core/typesIsolation.test.ts`    | 契约目录纯净性：`src/types/` 内只允许 `./` 引用，出现外部引用即失败                                             |
 | `tests/directModule/configHierarchy.test.ts` | 配置层级门控（递归隐藏、`|` 多值、父值回退 `default_value`）                                             |

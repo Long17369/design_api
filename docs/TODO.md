@@ -185,13 +185,17 @@
 - [x] 缓存 key 规范与清单：`@core/cache` 只提供通用能力（KV + TTL + tag 失效），**key 由使用它的模块自己定义**（不在 core 集中登记）；命名 `<模块>:<用途>`、`tag` 必须等于来源表名；清单与编码规范见 `docs/CACHE.md`
 - [x] seeds 一致性自检：`tests/e2e/verify_seeds.ts` 逐表逐列比对「seeds 定义 vs 库中现有行」（输出 `SEEDS_EQUIVALENT_OK`）；借此发现并修掉 `sensor_spike_*` 的 `order` 漂移（新增开关行后原 4 行未后移，出现重复 21 号）——seeds 只补不覆盖，改既有行定义必须手工迁移（SQL 见 `docs/API-CHANGES.md` 升级须知）
 - [x] 累计流量持久化（已实现）：进程启动后首次上报时，从该设备**最后一条落库帧**（mapper 中 `api_name='liu_liang1'` 对应列，默认 `field5`）恢复累计值 → 重启不再归零（日志「累计流量已恢复: <d_no> = <N>L」）；无历史数据则从 0 开始
+- [x] **WHERE 条件操作符扩充**（2026-09-14）：由 6 个比较符扩到 14 个 —— 新增 `like`/`not like`（顺带修「前端故障历史文本搜索被 400 拒绝」）、`in`/`not in`、`between`/`not between`、`is null`/`is not null`
+  - 操作符白名单**上提到契约** `types.ts`：四组常量（单值/集合/区间/空值）为唯一真源，`WhereOperator` 等类型由常量派生，HTTP 校验与 SQL 生成共用（不再各维护一份，避免「类型允许但校验拒绝」漂移）
+  - 值形态：单值字符串、集合/区间字符串数组、空值不带值；值一律 `?` 占位符，非法形状（未知操作符 / 空集合 / `between` 非 2 元素 / 值类型不符）→ 400
+  - 用例：`tests/core/where.test.ts`
 
 ## 工程 / 工具 / 依赖
 
 - [x] 运行与校验：`tsx` 运行（勿用 ts-node）、`pnpm type-check` / `lint` / `format`
 - [x] 类型出口统一：`MQTTMessageOut` 以 `src/types/types.ts` 为唯一定义来源；`types.ts` 属对外契约保持稳定
 - [x] 清理：删除空 `runtime/` 目录、移除 `test` 占位脚本
-- [x] 测试工程化：**vitest 单测**（`pnpm test`，`tests/` 7 文件 41 用例）覆盖组件判定/告警/PID/缓存/图表/配置层级/跳变检测；**E2E 全链路脚本已入库到 `tests/e2e/`**（22 个，依赖真实 MySQL/MQTT/服务，用法见 `docs/TESTING.md`）；`pnpm type-check` 覆盖 `src`+`tests`；`tmp/` 只留运行产物（已 gitignore）
+- [x] 测试工程化：**vitest 单测**（`pnpm test`，套件规模见命令输出）覆盖组件判定/告警/PID/缓存/图表/配置层级/跳变检测/where 操作符；**E2E 全链路脚本已入库到 `tests/e2e/`**（22 个，依赖真实 MySQL/MQTT/服务，用法见 `docs/TESTING.md`）；`pnpm type-check` 覆盖 `src`+`tests`；`tmp/` 只留运行产物（已 gitignore）
 - [x] `MQTT_MESSAGE`：**保留**声明 —— 骨架期设计的「入站消息经 bus 广播」事件，后改为 topicHandlers 直接处理后闲置；将来做统一入站分发可复用（此处备注来历，不删）
 - [x] `errorMessage`：**暂留** —— 为后续「服务器驱动化」重构预留的事件通道，届时再定去留
 - [x] 死依赖：**不动**（`uuid` / `dotenv` / `nodemon` / `ts-node` 保留；`jiti` 为 ESLint 加载 TS 配置所需，勿删）

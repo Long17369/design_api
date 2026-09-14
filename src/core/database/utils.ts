@@ -1,5 +1,13 @@
 import { log } from '@core/logger'
-import { DataQueryParams, Where, WhereCondition } from '@/types/types'
+import {
+  DataQueryParams,
+  Where,
+  WhereCondition,
+  WHERE_OPERATORS_MULTI_VALUE,
+  WHERE_OPERATORS_NO_VALUE,
+  WHERE_OPERATORS_PAIR_VALUE,
+  WHERE_OPERATORS_SINGLE_VALUE,
+} from '@/types/types'
 import { ChartQueryParams, TableInfoBuilded } from '@core/database'
 import { ColumnInfo, TableInfo } from '@core/database/tables'
 import { SqlValue } from './tables'
@@ -157,7 +165,69 @@ export function isColumnAllowed(info: TableInfoBuilded, column: string): boolean
   return column === 'id' || info.columns.has(column)
 }
 
-/** 构建 WHERE 子句与参数（多条件用 AND 连接） */
+/** 操作符分组（真源在 `@/types/types`） */
+const SINGLE_VALUE_OPERATORS = new Set<string>(WHERE_OPERATORS_SINGLE_VALUE)
+const MULTI_VALUE_OPERATORS = new Set<string>(WHERE_OPERATORS_MULTI_VALUE)
+const PAIR_VALUE_OPERATORS = new Set<string>(WHERE_OPERATORS_PAIR_VALUE)
+const NO_VALUE_OPERATORS = new Set<string>(WHERE_OPERATORS_NO_VALUE)
+
+/** 运行时形态：条件可能来自 JSON，只有 operator 一定是字符串 */
+interface RawCondition {
+  operator: string
+  value?: unknown
+}
+
+/** 条件值归一化为字符串数组（单值 → 1 元数组） */
+function toValueList(value: unknown): string[] {
+  const items = Array.isArray(value) ? value : value === undefined ? [] : [value]
+  return items.map((item) => {
+    if (typeof item !== 'string') {
+      throw new Error('条件值必须是字符串或字符串数组')
+    }
+    return item
+  })
+}
+
+/** 单个条件 → SQL 片段 + 参数；操作符只用于查分组表，值一律走 `?` 占位符 */
+function buildConditionSQL(
+  column: string,
+  condition: WhereCondition,
+): { sql: string; params: SqlValue[] } {
+  const raw: RawCondition = condition
+  const operator = raw.operator
+  const keyword = operator.toUpperCase()
+  const col = quote(column)
+
+  if (NO_VALUE_OPERATORS.has(operator)) {
+    return { sql: `${col} ${keyword}`, params: [] }
+  }
+  // 单值操作符只接受字符串（数组是集合/区间的写法）
+  if (SINGLE_VALUE_OPERATORS.has(operator)) {
+    if (typeof raw.value !== 'string') {
+      throw new Error(`${operator} 需要 1 个字符串条件值`)
+    }
+    return { sql: `${col} ${keyword} ?`, params: [raw.value] }
+  }
+  const values = toValueList(raw.value)
+  if (PAIR_VALUE_OPERATORS.has(operator)) {
+    const [low, high] = values
+    if (values.length !== 2 || low === undefined || high === undefined) {
+      throw new Error(`${operator} 需要恰好 2 个条件值`)
+    }
+    return { sql: `${col} ${keyword} ? AND ?`, params: [low, high] }
+  }
+  if (MULTI_VALUE_OPERATORS.has(operator)) {
+    if (values.length === 0) {
+      throw new Error(`${operator} 至少需要 1 个条件值`)
+    }
+    return { sql: `${col} ${keyword} (${values.map(() => '?').join(', ')})`, params: [...values] }
+  }
+
+  logger.error(`列 ${column} 使用了不支持的操作符 ${operator}`)
+  throw new Error(`不支持的操作符 ${operator}`)
+}
+
+/** 构建 WHERE 子句与参数（多条件用 AND 连接；同一列的多个条件按数组顺序拼接） */
 export function buildWhereSQL(
   info: TableInfoBuilded,
   where: Where,
@@ -170,15 +240,11 @@ export function buildWhereSQL(
       logger.error(`列 ${column} 不存在于表 ${info.name}`)
       throw new Error(`列 ${column} 不存在于表 ${info.name}`)
     }
-    if (Array.isArray(condition)) {
-      for (const cond of condition) {
-        if (cond === undefined) continue
-        clauses.push(`${quote(column)} ${cond.operator} ?`)
-        params.push(cond.value)
-      }
-    } else {
-      clauses.push(`${quote(column)} ${condition.operator} ?`)
-      params.push(condition.value)
+    for (const cond of Array.isArray(condition) ? condition : [condition]) {
+      if (cond === undefined) continue
+      const built = buildConditionSQL(column, cond)
+      clauses.push(built.sql)
+      params.push(...built.params)
     }
   }
   return {

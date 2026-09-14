@@ -22,6 +22,45 @@
   服务端消息为 `{ event, data }`，`event ∈ data | alarm | direct`；
   连接后先收到欢迎消息（内含 `goal` token，用于定向补推与重连复用，前端可忽略该字段）
 
+### 查询条件 `where` 支持的操作符（2026-09-14 扩充）
+
+`where` 形如 `{ 列名: 条件 }`，条件 = `{ operator, value? }`；同一列可写成数组（多个条件），
+条件之间一律 **AND**。操作符白名单的**唯一真源**是契约常量 `WHERE_OPERATORS`（`src/types/types.ts`），
+后端入参校验与 SQL 生成共用它：
+
+| 分组 | 操作符                                       | `value`    | SQL                        |
+| ---- | -------------------------------------------- | ---------- | -------------------------- |
+| 比较 | `=` `!=` `>` `>=` `<` `<=` `like` `not like` | 字符串     | `` `列` OP ? ``             |
+| 集合 | `in` `not in`                                | 字符串数组 | `` `列` IN (?, ?, ...) ``   |
+| 区间 | `between` `not between`                      | 2 元素数组 | `` `列` BETWEEN ? AND ? ``  |
+| 空值 | `is null` `is not null`                      | 无         | `` `列` IS NULL ``          |
+
+- 值一律走 `?` 占位符、操作符经白名单校验，**不存在注入面**（旧项目的 `${operator}` 直接拼接已弃用）
+- `like` 的通配符由调用方自带（如 `%关键字%`），后端不做转义
+- 集合也可只写单个字符串（`in` + `'A'` ⇒ `IN (?)`）；空集合非法
+- `is null` / `is not null` 不需要 `value`，带上会被忽略
+- 形状非法（未知操作符 / 空集合 / `between` 非 2 元素 / 值非字符串）→ `400 INVALID_PARAMETER`
+- 旧前端 `FaultHistory.vue` 的文本搜索用 `operator: 'like'`，**此前会被 400 拒绝**，本次一并修复
+
+`where` 以 JSON 字符串放在 query 里（`?where=<JSON>`），契约函数 `getData`/`getCount`/`getTimeRange`
+已自动 `JSON.stringify`，前端无需特殊处理。写法示例：
+
+```jsonc
+// 单值
+{ "d_no": { "operator": "=", "value": "DEV1" } }
+// 模糊（通配符自带）
+{ "field1": { "operator": "like", "value": "%超温%" } }
+// 集合
+{ "d_no": { "operator": "in", "value": ["DEV1", "DEV2"] } }
+// 区间
+{ "c_time": { "operator": "between", "value": ["2026-09-01 00:00:00", "2026-09-02 00:00:00"] } }
+// 空值（不带 value）
+{ "field1": { "operator": "is null" } }
+// 同一列多条件（时间区间）→ AND
+{ "c_time": [{ "operator": ">=", "value": "2026-09-01 00:00:00" },
+             { "operator": "<=", "value": "2026-09-02 00:00:00" }] }
+```
+
 ## 接口对照（旧前端实际调用过）
 
 | 旧前端调用                                                                  | 新后端                    | 说明                                                                                                                                       |
@@ -61,6 +100,8 @@
    `send`/`close` 直接用），地址由 `location` + `WS_PATH` 拼出，**不要手写路径**；
    重连时传旧 token：`connectWebSocket(oldGoal)` → 地址带 `?goal=<旧token>`；
    开发环境经 Vite 代理时，代理需按路径转发 ws（如 `'/api': { target, changeOrigin: true, ws: true }`）
+9. 故障历史文本搜索（`FaultHistory.vue` 的 `operator: 'like'`）**现已可用**：后端已补齐
+   `like`/`in`/`between`/`is null` 等操作符（见上方「查询条件 `where` 支持的操作符」），前端无需改动
 
 ## 升级须知（后端侧变更，部署/换库时执行）
 

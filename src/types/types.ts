@@ -115,13 +115,67 @@ export interface DataCount {
   count: number
 }
 
-export type WhereOperator = '=' | '>' | '<' | '>=' | '<=' | '!='
+/** WHERE 操作符：按 SQL 占位符形态分四组，类型与运行时校验均由这些常量派生 */
+export const WHERE_OPERATORS_SINGLE_VALUE = [
+  '=',
+  '!=',
+  '>',
+  '>=',
+  '<',
+  '<=',
+  'like',
+  'not like',
+] as const
 
-export interface WhereCondition {
+/** 集合：`列 IN (?, ...)` */
+export const WHERE_OPERATORS_MULTI_VALUE = ['in', 'not in'] as const
+
+/** 区间：`列 BETWEEN ? AND ?` */
+export const WHERE_OPERATORS_PAIR_VALUE = ['between', 'not between'] as const
+
+/** 空值：`列 IS NULL`（不带值） */
+export const WHERE_OPERATORS_NO_VALUE = ['is null', 'is not null'] as const
+
+export type WhereOperator =
+  | (typeof WHERE_OPERATORS_SINGLE_VALUE)[number]
+  | (typeof WHERE_OPERATORS_MULTI_VALUE)[number]
+  | (typeof WHERE_OPERATORS_PAIR_VALUE)[number]
+  | (typeof WHERE_OPERATORS_NO_VALUE)[number]
+
+/** 全部操作符（运行时白名单） */
+export const WHERE_OPERATORS: readonly WhereOperator[] = [
+  ...WHERE_OPERATORS_SINGLE_VALUE,
+  ...WHERE_OPERATORS_MULTI_VALUE,
+  ...WHERE_OPERATORS_PAIR_VALUE,
+  ...WHERE_OPERATORS_NO_VALUE,
+]
+
+export type WhereSingleOperator = (typeof WHERE_OPERATORS_SINGLE_VALUE)[number]
+export type WhereMultiOperator = (typeof WHERE_OPERATORS_MULTI_VALUE)[number]
+export type WherePairOperator = (typeof WHERE_OPERATORS_PAIR_VALUE)[number]
+export type WhereNoValueOperator = (typeof WHERE_OPERATORS_NO_VALUE)[number]
+
+/** 恰好一个字符串值 */
+export interface WhereConditionSingle {
+  operator: WhereSingleOperator
   value: string
-  operator: WhereOperator
 }
 
+/** `in` 任意非空个值（单值可写成字符串）；`between` 恰好 2 个 */
+export interface WhereConditionList {
+  operator: WhereMultiOperator | WherePairOperator
+  value: string | string[]
+}
+
+/** 不带条件值 */
+export interface WhereConditionNull {
+  operator: WhereNoValueOperator
+}
+
+/** 单个条件（写法与语义见 `docs/API-CHANGES.md`） */
+export type WhereCondition = WhereConditionSingle | WhereConditionList | WhereConditionNull
+
+/** `{ 列名: 条件 }`；同一列多个条件写成数组，条件之间一律 AND */
 export interface Where {
   [key: string]: WhereCondition | WhereCondition[]
 }
