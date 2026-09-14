@@ -24,7 +24,11 @@ import { buildAutoConfig, loadConfigDefaults, pushHistory, sendAlarm, setControl
 
 const logger = log.getLogger('AutoControlModule')
 
-/** 阈值配置默认值缓存 key（tag = direct_config，写库时自动失效） */
+/**
+ * 本模块私有缓存 key（清单见 `docs/CACHE.md`）：
+ * 内容 = `direct_config` 的 code → default_value（阈值全局默认值，逐帧再合并设备级 `direct` 值）；
+ * tag = `direct_config` → 写库自动失效；TTL 兜底 60s。
+ */
 const CONFIG_DEFAULTS_KEY = 'autoControl:configDefaults'
 
 /** 离线扫描定时器间隔(ms)：轻量 5s 扫描，不做「暂停自动控制」等重机制 */

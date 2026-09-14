@@ -21,10 +21,13 @@ import {
 
 const logger = log.getLogger('SensorModule')
 
-/** 派生计算配置缓存 key（tag = direct_config） */
+/**
+ * 派生计算配置缓存 key（清单见 `docs/CACHE.md`）：
+ * 内容 = 窗口秒数 / 跳变阈值；tag = `direct_config` → 写库自动失效；TTL 兜底 60s。
+ */
 const CONFIG_CACHE_KEY = 'sensorModule:config'
 
-/** 字段映射表缓存 key（tag = sensor_data_mapper） */
+/** 字段映射表缓存 key：内容 = `api_name` → `db_name`；tag = `sensor_data_mapper` */
 const MAPPER_CACHE_KEY = 'sensorModule:mapper'
 
 /**
