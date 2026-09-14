@@ -8,6 +8,15 @@ const ALARM: AlarmDef = {
   message: '水泵空转：流量持续归零，已自动停泵',
 }
 
+/** 空转**解除**告警：状态切换（流量恢复）时推送一次，前端据此清横幅 */
+const RELEASE_ALARM: AlarmDef = {
+  code: 'pump_idle_release',
+  level: 'warning',
+  message: '水泵空转已恢复：流量恢复',
+  type: 'reset',
+  category: 'release',
+}
+
 /** 组件内部去抖状态（按设备自持） */
 interface IdleState {
   /** 连续流量归零的起始时刻(ms)，流量恢复即清除 */
@@ -62,10 +71,17 @@ export const flowZeroComponent: AutoComponent = {
     }
 
     const flow = toNum(ctx.data.liu_liang2)
-    // 流量恢复（或缺测）：重置去抖，允许下次重新计时
+    // 流量恢复（或缺测）：重置去抖，允许下次重新计时；流量真实恢复时补一条解除
     if (flow === null || flow >= cfg.flowRateZero) {
+      const wasFired = state.fired
       state.since = null
       state.fired = false
+      if (wasFired && flow !== null) {
+        return {
+          reason: `水泵空转已恢复：流量 ${flow} ≥ ${cfg.flowRateZero}`,
+          alarm: RELEASE_ALARM,
+        }
+      }
       return null
     }
 

@@ -1,3 +1,4 @@
+import { lockManager } from '@core/locks'
 import { AlarmDef, AutoComponent, AutoCtx, AutoDecision } from '@modules/autoControl'
 import { isTempAnomaly } from '../utils'
 
@@ -12,6 +13,7 @@ const ALARM: AlarmDef = {
  * 堵塞判定④：温度异常 —— 升温1 连续上升 temp1_rise_count 次，
  * 同时升温2 在这些帧内保持稳定（极差 ≤ temp2_stable_delta）。
  * 命中即执行堵塞保护（关加热 + 关水泵 + 加 blocked 锁（持久化与推送由 LockModule 负责） + 预警）。
+ * 告警**仅状态切换时推送**（以 `blocked` 锁为「已推送」标志，复位后可再次推送）。
  * 相关配置：temp1_rise_count / temp2_stable_delta
  */
 export const tempAnomalyComponent: AutoComponent = {
@@ -24,9 +26,11 @@ export const tempAnomalyComponent: AutoComponent = {
   },
   evaluate(ctx: AutoCtx): AutoDecision | null {
     if (!isTempAnomaly(ctx.state, ctx.cfg)) return null
+    // 告警边沿：已有 blocked 锁 ⇒ 本设备本次堵塞已推送过
+    const firstAlarm = lockManager.get(ctx.d_no, 'blocked') === undefined
     return {
       reason: `水管堵塞：温度异常(升温1 连续上升 ${ctx.cfg.temp1RiseCount} 次且升温2 波动 ≤ ${ctx.cfg.temp2StableDelta})`,
-      alarm: ALARM,
+      ...(firstAlarm ? { alarm: ALARM } : {}),
       controls: [
         { target: 'heat', value: '0' },
         { target: 'water', value: '0' },

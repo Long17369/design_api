@@ -119,6 +119,11 @@
 - [ ] ③ 评估后再考虑「全库中间件 / 表级缓存策略配置」这类更重的方案（当前写穿透已覆盖应用内写入路径）
 - [x] 设备级配置覆盖：取值优先级 **设备 `direct` 值 > `direct_config.default_value` > 内置默认**（`buildAutoConfig` 逐帧合并设备值 → 前端改配置**立即生效**）；修复原先只读全局默认值导致「前端改配置对自动控制不生效」
 - [x] 离线告警 `sensor_offline`（已实现）：引擎内 **5s 轻量定时器**（`unref` 不阻塞退出）扫描最近上报时刻，超过 `sensor_offline_seconds`(60s，支持设备级覆盖) → 写 `error_msg(field3='offline')` + WS 告警（warning，只告警一次）；恢复上报推 `type='reset'`（前端清横幅），再次离线可再次告警；**不做**旧项目的「暂停自动控制」
+- [x] **告警改「仅状态切换时推送」**（2026-09-14）：引擎每帧执行命中的决策（不做去重）⇒ 堵塞期间**每帧**写 `error_msg` + 推 WS（实测同一次堵塞重复 4~6 条），`blocked` 锁也每帧重新 acquire（写库 + 推锁状态）
+  - 堵塞三判定（`pressure_zero` / `flow_unchanged` / `temp_anomaly`）：以 **`blocked` 锁为「已推送」标志**，无锁才带 `alarm`；仍每帧维持 `block` 决策（锁即状态，手动复位后可再次推送）
+  - 可自恢复的两类补**解除**推送（`type:'reset'` + `category:'release'`，前端清横幅）：`pump_idle_release`（流量恢复）、`reverse_temp_release`（温差恢复 / 停止加热）；缺测只静默重置
+  - 引擎 `blockDevice`：`blocked` 锁已存在时不再重复 acquire；手动复位补写 `error_msg(category='release', code='block_release')`
+  - **颜色/分类约定**：堵塞类 `error` 红 + `field3='block'`；解除类 `warning` 黄 + 独立 `field3='release'` + `type='reset'`（修「压力解锁被当堵塞染红」）
 - [x] **传感器离线哨兵值剔除**（2026-09-14）：设备传感器断线时上报 **6553.5**（= 0xFFFF/10，实测 `temp_in`/`temp_out` 各 41~42 帧，其余字段正常），原先会当作**真实温度**进入自动控制（超温关加热、温度异常判堵塞）与前端曲线。现于**数据入口**（`sensorModule.process` 首行）统一剔除为**空串**（缺测）
   - 下游天然一致：`toNum('')` → null（组件按缺测跳过）、`buildSensorRow` 跳过空值（该列**落库为 NULL**）、`pushSample`/`accumulateFlow` 跳过 null ⇒ 一处生效
   - 覆盖字段：`temp_in` / `temp_out` / `pressure` / `flow_rate`（开关类字段不参与）；哨兵常量 `OFFLINE_SENTINELS = [65535, 6553.5]`（`sensorModule/utils.ts`）

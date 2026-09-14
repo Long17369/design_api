@@ -353,6 +353,9 @@ export class AutoControlModule implements Closable {
     if (state.blocked) return
     state.blocked = true
 
+    // 堵塞锁已存在（堵塞持续中）→ 不再重复写库/推送锁状态：仅状态切换时推送
+    if (lockManager.get(dNo, 'blocked') !== undefined) return
+
     const snapshot: LockSnapshot = {
       heat: values.get('heat') === '1' ? '1' : '0',
       water: values.get('water') === '1' ? '1' : '0',

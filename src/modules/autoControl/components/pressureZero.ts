@@ -1,3 +1,4 @@
+import { lockManager } from '@core/locks'
 import { AlarmDef, AutoComponent, AutoCtx, AutoDecision } from '@modules/autoControl'
 import { toNum } from '../utils'
 
@@ -11,6 +12,9 @@ const ALARM: AlarmDef = {
 /**
  * 堵塞判定①：压力归零 —— pressure < pressure_zero。
  * 命中即执行堵塞保护（关加热 + 关水泵 + 加 blocked 锁（持久化与推送由 LockModule 负责） + 预警）。
+ *
+ * 告警**仅状态切换时推送**：`blocked` 锁即「已推送」标志（锁已存在则只继续维持堵塞态、不重复告警），
+ * 手动复位释放锁后若再次命中，会重新推送。
  * 相关配置：pressure_zero（压力归零阈值）
  */
 export const pressureZeroComponent: AutoComponent = {
@@ -20,9 +24,11 @@ export const pressureZeroComponent: AutoComponent = {
   evaluate(ctx: AutoCtx): AutoDecision | null {
     const pressure = toNum(ctx.data.pressure)
     if (pressure === null || pressure >= ctx.cfg.pressureZero) return null
+    // 告警边沿：已有 blocked 锁 ⇒ 本设备本次堵塞已推送过
+    const firstAlarm = lockManager.get(ctx.d_no, 'blocked') === undefined
     return {
       reason: `水管堵塞：压力归零(${pressure} < ${ctx.cfg.pressureZero})`,
-      alarm: ALARM,
+      ...(firstAlarm ? { alarm: ALARM } : {}),
       controls: [
         { target: 'heat', value: '0' },
         { target: 'water', value: '0' },
