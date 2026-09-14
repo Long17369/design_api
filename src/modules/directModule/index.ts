@@ -16,6 +16,7 @@ import {
   directKeyQuery,
   directKeyWhere,
   directValueQuery,
+  filterVisibleConfigs,
   toConfig,
   validateValue,
 } from './utils'
@@ -68,9 +69,20 @@ export class DirectModule implements Closable {
   /**
    * 获取全部指令配置（code/ref_code → id/ref_id 映射为前端契约）
    */
-  public async listConfigs(): Promise<DirectConfig[]> {
+  /**
+   * 获取指令配置列表。
+   *
+   * 传 `d_no` 时按**层级门控**（`ref_id`/`ref_value`：父开关未开启则不返回子配置）
+   * 过滤后再返回，供配置页只展示当前可见项；不传时返回全量（兼容旧调用）。
+   */
+  public async listConfigs(d_no?: string): Promise<DirectConfig[]> {
     const rows = await this.db().executeQuery<DirectConfigRow>(CONFIG_LIST_QUERY)
-    return rows.map((row) => toConfig(row))
+    const configs = rows.map((row) => toConfig(row))
+    if (!d_no) return configs
+
+    const device = await this.listByDevice(d_no)
+    const values = new Map(device.map((row) => [row.config_id, row.value ?? '']))
+    return filterVisibleConfigs(configs, values)
   }
 
   /**

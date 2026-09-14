@@ -6,6 +6,7 @@ import type { DataPayload } from '@/types/types'
 const CFG: SensorConfig = {
   heatRateWindow: 60,
   avgFlowWindow: 60,
+  spikeEnabled: true,
   spikeFrames: 2,
   spikeTemp: 5,
   spikePressure: 10,
