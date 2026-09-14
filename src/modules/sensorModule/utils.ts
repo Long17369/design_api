@@ -1,6 +1,6 @@
 import { DataPayload, FieldMapper, WsData } from '@/types/types'
 import { SqlValue } from '@core/database/tables'
-import { DeviceState, SensorSample } from '@modules/sensorModule'
+import { DeviceState, SensorConfig, SensorSample } from '@modules/sensorModule'
 
 /** 缺失值安全转字符串（避免 String(undefined) 得到 'undefined'） */
 function toStr(value: string | number | undefined | null): string {
@@ -29,6 +29,25 @@ export function fmt(n: number, digits = 2): string {
 export function parseTime(value: string): number {
   const t = Date.parse(value.includes('T') ? value : value.replace(' ', 'T'))
   return Number.isNaN(t) ? Date.now() : t
+}
+
+/**
+ * 跳变检测（数据质量）：任一监控字段相对上一帧的变化超过对应阈值即视为本帧跳变。
+ * 返回本帧是否跳变；累计帧数与「标记 invalid」由调用方按 `spikeFrames` 决定（多帧累计防抖）。
+ */
+export function hasSpike(prev: DataPayload, cur: DataPayload, cfg: SensorConfig): boolean {
+  return (
+    jumped(toNum(prev.temp_in), toNum(cur.temp_in), cfg.spikeTemp) ||
+    jumped(toNum(prev.temp_out), toNum(cur.temp_out), cfg.spikeTemp) ||
+    jumped(toNum(prev.pressure), toNum(cur.pressure), cfg.spikePressure) ||
+    jumped(toNum(prev.flow_rate), toNum(cur.flow_rate), cfg.spikeFlow)
+  )
+}
+
+/** 两帧数值差是否超过阈值（任一缺测或阈值<=0 不算跳变） */
+function jumped(prev: number | null, cur: number | null, threshold: number): boolean {
+  if (prev === null || cur === null || threshold <= 0) return false
+  return Math.abs(cur - prev) > threshold
 }
 
 /**

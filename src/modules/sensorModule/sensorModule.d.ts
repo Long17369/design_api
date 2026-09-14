@@ -1,5 +1,5 @@
 import { SensorModule } from '.'
-import { WsData } from '@/types/types'
+import { DataPayload, WsData } from '@/types/types'
 
 declare module '@modules/sensorModule' {
   SensorModule
@@ -22,6 +22,10 @@ declare module '@modules/sensorModule' {
     tempSamples: SensorSample[]
     /** 瞬时流量采样（avg_flow 窗口） */
     flowSamples: SensorSample[]
+    /** 上一帧原始上报（跳变检测用） */
+    lastRaw: DataPayload | null
+    /** 连续跳变帧数（防抖：达到阈值帧数才标记无效） */
+    spikeCount: number
   }
 
   /** 派生计算配置（来自 direct_config.default_value） */
@@ -30,6 +34,14 @@ declare module '@modules/sensorModule' {
     heatRateWindow: number
     /** avg_flow 窗口(秒) */
     avgFlowWindow: number
+    /** 跳变帧数阈值：连续 N 帧超出跳变阈值才标记 invalid；0 = 关闭跳变检测 */
+    spikeFrames: number
+    /** 温度跳变阈值(°C) */
+    spikeTemp: number
+    /** 压力跳变阈值(kPa) */
+    spikePressure: number
+    /** 流量跳变阈值(L/min) */
+    spikeFlow: number
   }
 }
 
