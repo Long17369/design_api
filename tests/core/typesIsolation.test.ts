@@ -31,4 +31,13 @@ describe('src/types 契约目录纯净性', () => {
 
     expect(violations).toEqual([])
   })
+
+  /** 类型导入必须显式 `import type`：前端 Vite/esbuild 逐文件转译会保留普通 import，运行时找不到命名导出 */
+  it('api.ts 从 ./types 导入必须用 import type', () => {
+    const source = fs.readFileSync(path.join(TYPES_DIR, 'api.ts'), 'utf8')
+
+    expect(source).toMatch(/^import type \{[\s\S]*?\} from '\.\/types'$/m)
+    // 不允许无 `type` 的具名导入
+    expect(source).not.toMatch(/^import \{/m)
+  })
 })
