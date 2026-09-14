@@ -154,7 +154,7 @@
 - [x] 前端契约：`api.ts::sendControlCommand` / `resetDeviceBlock`
 - [x] `direct_config.blocked` 内部标记外泄给 `GET /api/direct/config`：**已解决** —— 配置行删除（列表回到 18 项），堵塞标记改由 `device_locks` 承担
 - [x] 配置项层级门控：`GET /api/direct/config?d_no=` 按 `ref_code`/`ref_value` **递归**过滤（父开关未开启时子配置不下发到配置页）；子项重新挂到各自开关（`pid_enabled`/`flow_target_enabled`/`sensor_spike_enabled`），跳变检测由 `sensor_spike_frames>0` 改为显式开关 `sensor_spike_enabled`；不传 `d_no` 仍返回全量（向后兼容）。迁移 SQL 见 `docs/API-CHANGES.md`
-- [x] `ErrorCode.NOT_IMPLEMENTED`：**保留**（对外错误码联合类型，先不收缩）
+- [x] `ErrorCode.NOT_IMPLEMENTED`：**已移除**（`direct` 写接口实装后不再返回 501）；`http.d.ts` 的声明改为直接引用契约 `types.ts::ErrorCode`，不再各自列一份（本次修复：声明与文档曾多出 `NOT_IMPLEMENTED`，与契约不符）
 - [x] 旧前端接口差异：已整理成 `docs/API-CHANGES.md`（接口对照 + WS 差异 + 前端适配清单），**暂不改后端**
 
 ## 指令下发 · 设备端接口（`modules/directModule/dispatch.ts`）

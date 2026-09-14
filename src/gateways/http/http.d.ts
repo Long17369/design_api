@@ -1,5 +1,6 @@
 import { HttpServer } from '.'
 import { Request, Response } from 'express'
+import type { ErrorCode as ContractErrorCode } from '@/types/types'
 
 declare module '@gateways/http' {
   HttpServer
@@ -15,9 +16,9 @@ declare module '@gateways/http' {
     success: true
     data: T
   }
-  // HTTP 错误响应 范围错误 数据库错误 参数错误 未知错误 未实现
-  type ErrorCode =
-    'INVALID_PARAMETER' | 'DATABASE_ERROR' | 'INVALID_PARAMS' | 'UNKNOWN_ERROR' | 'NOT_IMPLEMENTED'
+  // HTTP 错误响应 范围错误 数据库错误 参数错误 未知错误
+  /** 错误码与对外契约 `src/types/types.ts::ErrorCode` 同一份（勿在此另列） */
+  type ErrorCode = ContractErrorCode
   interface ErrorResponse {
     success: false
     error: {

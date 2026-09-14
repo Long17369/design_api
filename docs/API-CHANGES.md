@@ -7,7 +7,8 @@
 - 统一前缀：`/api`（契约文件 `api.ts` 直接用后端常量 `API_BASE`，无需改）
 - 成功：`{ "success": true, "data": ... }`
 - 失败：`{ "success": false, "error": { "message": string, "code": string } }`
-  - `code` ∈ `INVALID_PARAMETER | DATABASE_ERROR | INVALID_PARAMS | UNKNOWN_ERROR | NOT_IMPLEMENTED`
+  - `code` ∈ `INVALID_PARAMETER | DATABASE_ERROR | INVALID_PARAMS | UNKNOWN_ERROR`
+    （与契约 `src/types/types.ts::ErrorCode` 一致；`NOT_IMPLEMENTED` 已在 direct 写接口实装后移除）
 - 资源名（每个资源 = 数据表 + 字段映射表）：
   `sensor`（传感器数据）/ `behavior`（行为数据）/ `error`（故障告警）/ `control`（控制记录）
 - 历史图表：`GET /api/{sensor|behavior|error|control}/chart?d_no=&start=&end=&buckets=`
