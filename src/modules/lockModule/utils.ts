@@ -4,7 +4,7 @@ import { SqlValue } from '@core/database/tables'
 import { DataQueryParams, Where } from '@/types/types'
 import { DeviceLockRow } from '.'
 
-/** 锁类型白名单（解析持久化记录时校验，避免脏数据进内存） */
+/** 锁类型白名单（解析持久化记录时校验，避免脏数据进内存；leak 为预留类型） */
 const LOCK_TYPES: LockType[] = ['blocked', 'overpressure', 'pump_idle', 'leak']
 
 /** 查询公共参数：按 id 升序，最多 100 条 */

@@ -4,7 +4,8 @@ import { DeviceLock, LockChange, LockSnapshot, LockTarget, LockType } from '.'
 /**
  * 统一锁定通道（LockManager）。
  *
- * 集中管理设备级保护锁（堵塞 blocked / 过压 overpressure / 空转 pump_idle / 泄漏 leak）：
+ * 集中管理设备级保护锁（堵塞 blocked / 过压 overpressure / 空转 pump_idle）：
+ * （`leak` 为预留类型，当前无组件产生，见 locks.d.ts 与 docs/TODO.md）
  * - 自动控制命中保护规则时 `acquire` 加锁，并在锁上携带「锁定前 heat/water 快照」；
  * - 控制下发前可用 `isDenied` 拦截被锁目标（避免绕过保护重新开车）；
  * - 手动复位时 `releaseAll` 释放该设备全部锁，并取回快照用于恢复运行。

@@ -7,7 +7,7 @@ declare module '@modules/lockModule' {
   interface DeviceLockRow {
     id: number
     d_no: string
-    /** 锁类型：blocked / overpressure / pump_idle / leak */
+    /** 锁类型：blocked / overpressure / pump_idle / leak（leak 为预留，当前无组件产生） */
     type: string
     reason: string | null
     /** 禁止的控制目标 JSON */

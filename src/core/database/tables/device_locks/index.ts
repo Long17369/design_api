@@ -15,7 +15,7 @@ const additional_columns = [
   {
     name: 'type',
     type: new ColumnTypeVARCHAR(32),
-    desc: '锁类型：blocked / overpressure / pump_idle / leak',
+    desc: '锁类型：blocked / overpressure / pump_idle / leak（leak 预留）',
   },
   {
     name: 'reason',
