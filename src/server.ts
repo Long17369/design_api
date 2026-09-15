@@ -1,7 +1,9 @@
 import { bus } from '@core/bus'
+import { cache } from '@core/cache'
 import { Config } from '@core/config'
-import type { ConfigChange } from '@core/config'
-import { diffConfigSections } from '@core/config/utils'
+import type { ConfigApplyStatus, ConfigChange, ConfigSectionName } from '@core/config'
+import { applyConfigChanges, diffConfigSections } from '@core/config/utils'
+import { lockManager } from '@core/locks'
 import { Database } from '@core/database'
 import type { Closable } from '@core/lifecycle'
 import { log } from '@core/logger'
@@ -10,12 +12,27 @@ import { AlarmModule, AutoControlModule, DirectModule, LockModule, SensorModule 
 
 const logger = log.getLogger('Server')
 
+/** 无变更/未启动时的热更新结果 */
+const NO_CHANGE: ReloadResult = {
+  changed: [],
+  applied: false,
+  appliedSections: [],
+  failedSections: [],
+  pendingRestart: [],
+}
+
 /** 热更新结果 */
 export interface ReloadResult {
   /** 有变更的 section（为空表示配置未变） */
   changed: ConfigChange[]
-  /** 是否已把变更应用到组件（当前恒为 false，应用逻辑待实现） */
+  /** 是否至少有一个 section 已生效 */
   applied: boolean
+  /** 已按新配置生效的 section */
+  appliedSections: ConfigSectionName[]
+  /** 未生效的 section（应用失败 / 超时未回报） */
+  failedSections: ConfigSectionName[]
+  /** 不可热更、需完整 `restart()` 才能生效的 section（如 `port` / `database`） */
+  pendingRestart: ConfigSectionName[]
 }
 
 /**
@@ -29,7 +46,8 @@ export interface ReloadResult {
  *   并开始监听端口；重复调用直接忽略；
  * - `stop(reason)`：广播 `shutdown` 事件，各组件（构造时订阅）自行 `close()` 释放资源；
  * - `restart()`：进程内重建 —— 关停全部组件（等释放完成后）重新装配并启动；
- * - `reloadConfig()`：配置热更新 —— 重新读配置并比对差异（应用逻辑待实现，见方法内 TODO）。
+ * - `reloadConfig()`：配置热更新 —— 重新读配置、比对差异，并广播 `CONFIG_CHANGED`
+ *   由各 section 的归属组件自行应用，等回报后汇总结果。
  *
  * 上述方法供 CLI 调用，暂未接入任何 HTTP 路由。
  */
@@ -133,6 +151,10 @@ export class Server {
    * 与 `stop()` 的差别：`stop()` 是「为进程退出而关停」，不等各组件完成（由 `main.ts`
    * 的兜底超时保证退出）；`restart()` 需要**确定的完成信号**，故逐个 `await close()`。
    * 各组件 `close()` 幂等，且本方法不广播 `shutdown` 事件，因此不会与订阅关闭重复释放。
+   *
+   * 组件之外还有**进程级单例**（缓存 / 锁通道：随进程存活、不参与 close），此处显式重置，
+   * 让进程内重启用起来与真实进程重启一致 —— 锁的持久化记录不动，由重建后的 `LockModule`
+   * 从 `device_locks` 恢复。
    */
   public async restart(): Promise<void> {
     if (!this.started || this.stopped) {
@@ -142,47 +164,76 @@ export class Server {
     logger.info('正在重启服务（进程内重建）...')
     await this.closeAll()
     this.reset()
+    this.resetProcessSingletons()
     await this.start()
     logger.info('服务重启完成')
   }
 
+  /** 重置进程级单例（不随组件 close 清空的内存态）：缓存 + 锁通道（含锁定前快照） */
+  private resetProcessSingletons(): void {
+    cache.clear()
+    lockManager.reset()
+  }
+
   /**
-   * 配置热更新：重新读取配置文件并与当前配置比对，返回变更的 section（按归属组件标注）。
+   * 配置热更新：重新读取配置文件 → 比对差异 → 广播 `CONFIG_CHANGED` 交由归属组件自行应用
+   * → 等回报（超时按未生效）→ 汇总结果。
    *
-   * 本次只做「重新读文件 + 计算 diff + 返回差异」，**不触碰任何组件** ——
-   * section 清单与归属（`owner`）来自各组件的自行注册（`@core/config::registerConfigSection`），
-   * 应用逻辑由各 section 的归属组件自行负责，Server 不越权代改。
+   * 职责边界：Server **只广播变更、不越权代改** —— section 清单与归属（`owner`）来自各组件的
+   * 自行注册（`@core/config::registerConfigSection`），具体怎么用由归属组件负责
+   * （`mqtt` → `MqttGateway.setConfig()` 重连并重订阅；`port` / `database` → 标记
+   * `restart-required`，需完整 `restart()`）。
    *
-   * TODO（热更新尚未做全）：
-   * 1. **通知机制**：Server 只广播变更（如 bus 新增 `CONFIG_CHANGED`），归属组件订阅后自行应用；
-   * 2. **各 section 的应用方式**：
-   *    - `mqtt` → `MqttGateway.setConfig()`（换 broker 需重连并重订阅主题）；
-   *    - `database` → `Database.setConfig()`（重连，需先确认无在途写入）；
-   *    - `port` → **不可热更**（HTTP 监听需重建 socket），只能按「需完整 `restart()`」处理；
-   * 3. **`this.config` 的更新时机**：待各 section 确认应用成功后再更新，否则下次 diff 会漏报
-   *    （当前一律不更新，保持「当前配置 = 实际生效配置」）；
-   * 4. **进程级单例**（`@core/cache` / `@core/locks`）在**进程内重启**时不会重置，与真实
-   *    进程重启行为不同，需评估是否由归属模块在 `restart()` 时显式清理。
+   * `this.config` 只写回**已生效**的 section（未生效的保持旧值）⇒ 下次 diff 仍能发现它，
+   * 不会因「广播过了」而漏报。
+   *
+   * TODO（热更新尚未做全）：`@core/cache` / `@core/locks` 等**进程级单例**在 `restart()` 时
+   * 不会重置，与真实进程重启行为不同，需评估是否由归属模块在 `restart()` 时显式清理。
    */
-  public reloadConfig(): ReloadResult {
-    if (!this.config) {
-      logger.warn('服务未启动，忽略 reloadConfig()')
-      return { changed: [], applied: false }
-    }
+  public async reloadConfig(): Promise<ReloadResult> {
     const current = this.config
+    if (!current) {
+      logger.warn('服务未启动，忽略 reloadConfig()')
+      return { ...NO_CHANGE }
+    }
     const next = new Config(this.configPath)
     const changed = diffConfigSections(current, next)
 
     if (changed.length === 0) {
       logger.info('配置热更新：无变更')
-      return { changed: [], applied: false }
+      return { ...NO_CHANGE }
     }
-    logger.warn(
+
+    logger.info(
       `配置热更新：检测到变更 ${changed
         .map((item) => `${item.section}(${item.owner})`)
-        .join(', ')}；应用逻辑待实现，本次未生效`,
+        .join(', ')}，广播 CONFIG_CHANGED 由归属组件自行应用`,
     )
-    return { changed, applied: false }
+    const results = await applyConfigChanges(changed, next)
+
+    const pick = (status: ConfigApplyStatus): ConfigSectionName[] =>
+      [...results].filter(([, value]) => value === status).map(([section]) => section)
+    const appliedSections = pick('applied')
+    const failedSections = pick('failed')
+    const pendingRestart = pick('restart-required')
+
+    // 只写回已生效的 section：未生效的下次 reload 仍会 diff 出来
+    const target = current as unknown as Record<string, unknown>
+    const source = next as unknown as Record<string, unknown>
+    for (const section of appliedSections) target[section] = source[section]
+
+    logger.info(
+      `配置热更新完成：已生效 [${appliedSections.join(', ') || '无'}]` +
+        (pendingRestart.length > 0 ? `；需 restart() [${pendingRestart.join(', ')}]` : '') +
+        (failedSections.length > 0 ? `；未生效 [${failedSections.join(', ')}]` : ''),
+    )
+    return {
+      changed,
+      applied: appliedSections.length > 0,
+      appliedSections,
+      failedSections,
+      pendingRestart,
+    }
   }
 
   /** 关停全部组件并等其释放完成（顺序与启动相反；数据库最后关，避免模块往已关闭的连接写） */

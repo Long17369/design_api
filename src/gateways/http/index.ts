@@ -47,6 +47,12 @@ export class HttpServer implements Closable {
       bus.onEvent('shutdown', () => {
         this.close()
       }),
+      bus.onEvent('CONFIG_CHANGED', ({ changed, report }) => {
+        if (!changed.some((item) => item.section === 'port')) return
+        // 监听 socket 需重建 ⇒ 无法热更，交由调用方走整体 restart()
+        logger.warn('配置热更新：port 变化需完整 restart()（监听端口不可热更）')
+        report('port', 'restart-required')
+      }),
     )
   }
 

@@ -1,5 +1,12 @@
-import type { Config, ConfigChange } from '@core/config'
+import type { Config, ConfigApplyStatus, ConfigChange, ConfigSectionName } from '@core/config'
+import { bus } from '@core/bus'
+import { log } from '@core/logger'
 import { getConfigSections } from '.'
+
+const logger = log.getLogger('Config')
+
+/** 等待各组件回报应用结果的默认时长(ms)；超时未回报的 section 按未生效处理 */
+export const CONFIG_APPLY_TIMEOUT_MS = 3000
 
 /**
  * 深比较两个 section 值是否相等。
@@ -20,4 +27,48 @@ export function diffConfigSections(current: Config, next: Config): ConfigChange[
   return getConfigSections()
     .filter((section) => !equalValue(current[section.name], next[section.name]))
     .map((section) => ({ section: section.name, owner: section.owner }))
+}
+
+/**
+ * 广播配置变更并等各归属组件回报应用结果。
+ *
+ * 「Server 只广播、组件自行应用」：本函数不关心各 section 怎么用，只负责
+ * 发 `CONFIG_CHANGED` → 等回报 → 把未回报的（无订阅者 / 应用卡住）记 `failed`。
+ * 同一 section 的多次回报只取**首次**（组件自身重复上报不会覆盖结论）。
+ *
+ * @returns section → 应用结果（`changed` 中的每一项都有结果，不会缺项）
+ */
+export async function applyConfigChanges(
+  changed: ConfigChange[],
+  config: Config,
+  timeoutMs: number = CONFIG_APPLY_TIMEOUT_MS,
+): Promise<Map<ConfigSectionName, ConfigApplyStatus>> {
+  const results = new Map<ConfigSectionName, ConfigApplyStatus>()
+  const expected = new Set(changed.map((item) => item.section))
+  let settle: () => void = () => {}
+  const allReported = new Promise<void>((resolve) => {
+    settle = resolve
+  })
+
+  const report = (section: ConfigSectionName, status: ConfigApplyStatus): void => {
+    if (!expected.has(section) || results.has(section)) return
+    results.set(section, status)
+    if (results.size >= expected.size) settle()
+  }
+
+  bus.emitEvent('CONFIG_CHANGED', { changed, config, report })
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, timeoutMs)
+  })
+  await Promise.race([allReported, timeout])
+  if (timer !== undefined) clearTimeout(timer)
+
+  for (const section of expected) {
+    if (results.has(section)) continue
+    results.set(section, 'failed')
+    logger.warn(`配置热更新：section ${section} 未在 ${timeoutMs}ms 内回报应用结果，按未生效处理`)
+  }
+  return results
 }
