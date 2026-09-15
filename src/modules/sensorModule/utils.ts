@@ -21,26 +21,42 @@ export function intOr(value: string | number | null | undefined, fallback: numbe
 }
 
 /**
- * 传感器离线 / 断线时设备回 **0xFFFF**，按 ×10 缩放后表现为 **6553.5**。
- * 实测（2026-09-14 16:16:31~16:17:12）：`temp_in`/`temp_out` 各 41~42 帧上报 6553.5，
- * 其余字段正常 —— 若不剔除，会被当成真实温度进入自动控制（超温关加热、温度异常判塔塞）
- * 与前端曲线。故按「最大值即无效」直接排除。
+ * 解析字段的无效值清单（`sensor_data_mapper.invalid_value`）。
+ * 内容为 JSON 数组（如 `[6553.5]`）；为方便手写也接受单个数值（如 `6553.5`）。
+ * 缺省/非法返回空数组（= 该字段不做无效值判定）。
  */
-const OFFLINE_SENTINELS = [65535, 6553.5]
-
-/** 参与哨兵值判定的测量类字段（开关类字段不参与） */
-const MEASURED_KEYS = ['temp_in', 'temp_out', 'pressure', 'flow_rate'] as const
+export function parseInvalidValues(raw: string | null | undefined): number[] {
+  if (raw === null || raw === undefined || raw === '') return []
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    parsed = raw
+  }
+  const list = Array.isArray(parsed) ? parsed : [parsed]
+  return list
+    .map((item) => toNum(item as string | number))
+    .filter((item): item is number => item !== null)
+}
 
 /**
- * 剔除传感器离线哨兵值：命中即置为**空串**（= 缺测，类型仍合法）。
+ * 剔除**无效上报值**（`invalid_value` 命中即置为**空串** = 缺测，类型仍合法）。
+ *
+ * 设备传感器断线 / 无回数时回 **0xFFFF**，而各字段倍率不同，故实际无效值按字段配置在
+ * 数据库（`sensor_data_mapper.invalid_value`），不再写死在代码里：
+ * 实测（2026-09-15 20:15~20:20）温度/压力 → 6553.5、瞬时流量 → 655.35、开关 → 65535。
  * 下游一致按缺测处理：`toNum('')` → null（组件跳过判定）、`buildSensorRow` 跳过空值
- * （该列落库为 NULL）、`pushSample`/`accumulateFlow` 跳过 null。
+ * （该列落库 NULL）、`pushSample`/`accumulateFlow` 跳过 null。
  */
-export function stripOfflineSentinels(payload: DataPayload): DataPayload {
+export function stripInvalidValues(payload: DataPayload, mapper: FieldMapper[]): DataPayload {
   const out = { ...payload }
-  for (const key of MEASURED_KEYS) {
-    const v = toNum(out[key])
-    if (v !== null && OFFLINE_SENTINELS.includes(v)) out[key] = ''
+  const view = out as unknown as Record<string, unknown>
+  for (const m of mapper) {
+    if (!m.api_name) continue
+    const invalid = parseInvalidValues(m.invalid_value)
+    if (invalid.length === 0) continue
+    const value = toNum(view[m.api_name] as string | number | undefined | null)
+    if (value !== null && invalid.includes(value)) view[m.api_name] = ''
   }
   return out
 }

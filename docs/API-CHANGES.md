@@ -167,22 +167,29 @@ UPDATE direct_config SET ref_code='flow_unchanged_enabled', ref_value='1'
 自检：`pnpm exec tsx tests/e2e/verify_seeds.ts`。若不先启动一次服务（补新行），会看到
 `direct_config 缺少行 code=flow_unchanged_enabled` 与上述 `ref_code` 差异两条。
 
-### 2026-09-14：清理存量「离线哨兵值」（一次性，部署时执行）
+### 2026-09-15：无效上报值清单落库（`sensor_data_mapper.invalid_value`）+ 存量清理
 
-传感器断线时设备上报 `6553.5`（= `0xFFFF / 10`）。**修复后**的数据入口（`sensorModule.process`
-首行 `stripOfflineSentinels`）会把它剔成缺测（该列落库 **NULL**），但**修复前已写入**的历史行仍是
-6553.5 —— 前端曲线会多出一根冲到 6553.5 的尖峰，自动控制若读到这些行也会被带偏。
+设备断线时回 **0xFFFF**，而各字段倍率不同 —— 实测（2026-09-15）：温度/压力 → `6553.5`、
+瞬时流量 → `655.35`、开关（`heat_Y1`/`water_Y2`）→ `65535`。判定清单现由**数据库列**驱动
+（`sensor_data_mapper.invalid_value`，JSON 数组；空/NULL = 该字段不判定），代码内不再写死。
 
 ```sql
--- 列名取自 sensor_data_mapper.api_name（默认即以下 4 列）；实测只有 field1/field2 有命中
+-- 1) 列由服务启动时自动 ALTER 补齐；既有库需回填一次（seeds 只补缺失行、不覆盖）
+UPDATE sensor_data_mapper SET invalid_value = '[6553.5]' WHERE api_name IN ('temp_in','temp_out','pressure');
+UPDATE sensor_data_mapper SET invalid_value = '[655.35]' WHERE api_name = 'flow_rate';
+UPDATE sensor_data_mapper SET invalid_value = '[65535]'  WHERE api_name IN ('heat_Y1','water_Y2');
+
+-- 2) 清理修复前已写入的历史行（列名取 api_name 对应的 db_name，默认如下）
 UPDATE sensor_data SET field1 = NULL WHERE field1 IN (65535, 6553.5);  -- temp_in   进水温度
 UPDATE sensor_data SET field2 = NULL WHERE field2 IN (65535, 6553.5);  -- temp_out  出水温度
-UPDATE sensor_data SET field6 = NULL WHERE field6 IN (65535, 6553.5);  -- flow_rate 瞬时流量
+UPDATE sensor_data SET field3 = NULL WHERE field3 IN (65535);          -- heat_Y1   加热开关
+UPDATE sensor_data SET field4 = NULL WHERE field4 IN (65535);          -- water_Y2  水泵状态
+UPDATE sensor_data SET field6 = NULL WHERE field6 IN (65535, 655.35);  -- flow_rate 瞬时流量
 UPDATE sensor_data SET field7 = NULL WHERE field7 IN (65535, 6553.5);  -- pressure  压力
 ```
 
-- 范围与代码一致：只清 **temp_in / temp_out / flow_rate / pressure** 四个测量列
-  （`sensorModule/utils.ts::MEASURED_KEYS`）
+- 取值为 **JSON 数组**（如 `[655.35]`），也接受单个数值（如 `655.35`）；解析失败按「不判定」处理
 - ⚠️ **不要**清 `流量总计（liu_liang1，默认 field5）`：它是本地累加的基准，置 NULL 会让重启后的
   累计续算从 0 开始
-- 本机执行记录（2026-09-14）：42 行命中（同一设备，共 83 个单元格）→ 全部置 NULL 并复扫为 0
+- 本机执行记录（2026-09-14，旧版四列范围）：42 行命中（同一设备，共 83 个单元格）→ 全部置 NULL
+  并复扫为 0

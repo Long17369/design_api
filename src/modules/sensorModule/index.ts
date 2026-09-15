@@ -15,7 +15,7 @@ import {
   intOr,
   parseTime,
   pushSample,
-  stripOfflineSentinels,
+  stripInvalidValues,
   toNum,
   toWsData,
 } from './utils'
@@ -28,7 +28,7 @@ const logger = log.getLogger('SensorModule')
  */
 const CONFIG_CACHE_KEY = 'sensorModule:config'
 
-/** 字段映射表缓存 key：内容 = `api_name` → `db_name`；tag = `sensor_data_mapper` */
+/** 字段映射表缓存 key：内容 = `api_name` → `db_name` / 无效值清单；tag = `sensor_data_mapper` */
 const MAPPER_CACHE_KEY = 'sensorModule:mapper'
 
 /**
@@ -91,10 +91,11 @@ export class SensorModule implements Closable {
       return
     }
 
-    // 传感器离线时设备回最大值（0xFFFF/10 = 6553.5）⇒ 入口处直接剔除为缺测
-    const raw = stripOfflineSentinels(payload)
-
     const [config, mapper] = await Promise.all([this.loadConfig(db), this.loadMapper(db)])
+
+    // 设备断线回 0xFFFF（各字段倍率不同）⇒ 按 mapper 配置的无效值清单剔除为缺测
+    const raw = stripInvalidValues(payload, mapper)
+
     const now = parseTime(raw.time)
     const flowRate = toNum(raw.flow_rate)
 
@@ -214,7 +215,7 @@ export class SensorModule implements Closable {
     )
   }
 
-  /** 读取 sensor_data 字段映射表（api_name→db_name，缓存 tag=sensor_data_mapper） */
+  /** 读取 sensor_data 字段映射表（api_name→db_name + 无效值清单，缓存 tag=sensor_data_mapper） */
   private loadMapper(db: Database): Promise<FieldMapper[]> {
     return cache.remember(
       MAPPER_CACHE_KEY,

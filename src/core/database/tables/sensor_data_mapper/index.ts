@@ -13,6 +13,11 @@ const additional_columns: ColumnInfo[] = [
     type: new ColumnTypeVARCHAR(64),
     desc: '后端字段名（对应 MQTT 上报 payload 的键，如 temp_in）',
   },
+  {
+    name: 'invalid_value',
+    type: new ColumnTypeVARCHAR(255),
+    desc: '无效值清单(JSON 数组，如 [6553.5])：上报命中即按缺测处理（落库 NULL）',
+  },
 ]
 
 const info = {

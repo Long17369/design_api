@@ -43,6 +43,8 @@ export interface FieldMapper {
   visible: '0' | '1' // 0: 不可见, 1: 可见
   chartable: '0' | '1' // 0: 不可图表化, 1: 可图表化
   mapping?: string | null // 值映射词表(JSON)：值->显示名，词条全局唯一复用
+  /** 无效值清单(JSON 数组，如 `[6553.5]`)：上报命中即按缺测处理（前端空值 / 落库 NULL） */
+  invalid_value?: string | null
 }
 
 // 数据类型

@@ -14,7 +14,7 @@ export const TABLE_SEEDS: TableSeed[] = [
   {
     table: 'sensor_data_mapper',
     keyColumn: 'id',
-    // id, f_name, db_name, p_name, api_name, unit, type, visible, chartable
+    // id, f_name, db_name, p_name, api_name, unit, type, visible, chartable, invalid_value
     columns: [
       'id',
       'f_name',
@@ -25,19 +25,20 @@ export const TABLE_SEEDS: TableSeed[] = [
       'type',
       'visible',
       'chartable',
+      'invalid_value',
     ],
     // prettier-ignore
     rows: [
-      [1,  'ID',       'id',     'id',        null,         '',    '1', '0', '0'],
-      [2,  '设备编号', 'd_no',   'id',        'id',         '',    '1', '1', '0'],
-      [3,  '数据时间', 'c_time', 'time',      'time',       '',    '1', '1', '0'],
-      [4,  '进水温度', 'field1', 'wen_du1',   'temp_in',    '°C',  '1', '1', '1'],
-      [5,  '出水温度', 'field2', 'wen_du2',   'temp_out',   '°C',  '1', '1', '1'],
-      [6,  '加热开关', 'field3', 'jia_re',    'heat_Y1',    '',    '1', '1', '0'],
-      [7,  '水泵状态', 'field4', 'shui_beng', 'water_Y2',   '',    '1', '1', '0'],
-      [8,  '流量总计', 'field5', 'liu_liang1', 'liu_liang1', 'L',   '1', '1', '0'],
-      [9,  '瞬时流量', 'field6', 'liu_liang2', 'flow_rate',  'L/min', '1', '1', '1'],
-      [10, '水流压力', 'field7', 'pressure',  'pressure',   'kPa', '1', '1', '1'],
+      [1,  'ID',       'id',     'id',        null,         '',      '1', '0', '0', null],
+      [2,  '设备编号', 'd_no',   'id',        'id',         '',      '1', '1', '0', null],
+      [3,  '数据时间', 'c_time', 'time',      'time',       '',      '1', '1', '0', null],
+      [4,  '进水温度', 'field1', 'wen_du1',   'temp_in',    '°C',    '1', '1', '1', '[6553.5]'],
+      [5,  '出水温度', 'field2', 'wen_du2',   'temp_out',   '°C',    '1', '1', '1', '[6553.5]'],
+      [6,  '加热开关', 'field3', 'jia_re',    'heat_Y1',    '',      '1', '1', '0', '[65535]'],
+      [7,  '水泵状态', 'field4', 'shui_beng', 'water_Y2',   '',      '1', '1', '0', '[65535]'],
+      [8,  '流量总计', 'field5', 'liu_liang1', 'liu_liang1', 'L',     '1', '1', '0', null],
+      [9,  '瞬时流量', 'field6', 'liu_liang2', 'flow_rate',  'L/min', '1', '1', '1', '[655.35]'],
+      [10, '水流压力', 'field7', 'pressure',  'pressure',   'kPa',   '1', '1', '1', '[6553.5]'],
     ],
   },
 

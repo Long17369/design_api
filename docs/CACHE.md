@@ -19,7 +19,7 @@
 | ---------------------------- | ---------------------- | --------------------------------------------------------------------------------------- | -------------------- | -------- |
 | `autoControl:configDefaults` | `modules/autoControl`  | `direct_config` 的 code → default_value（阈值全局默认值，逐帧再合并设备级 `direct` 值） | `direct_config`      | 默认 60s |
 | `sensorModule:config`        | `modules/sensorModule` | 派生计算配置（窗口秒数 / 跳变阈值，读 `direct_config.default_value`）                   | `direct_config`      | 默认 60s |
-| `sensorModule:mapper`        | `modules/sensorModule` | `sensor_data_mapper` 的 `api_name` → `db_name`                                          | `sensor_data_mapper` | 默认 60s |
+| `sensorModule:mapper`        | `modules/sensorModule` | `sensor_data_mapper` 的 `api_name` → `db_name` / 无效值清单                            | `sensor_data_mapper` | 默认 60s |
 
 ## 编码规范
 

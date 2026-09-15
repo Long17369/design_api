@@ -10,6 +10,7 @@ import WebSocket from 'ws'
  *  ③ 恢复上报 → 推送 type='reset' 的恢复事件（前端清除横幅）
  *  ④ 恢复后再次离线 → 可再次告警
  * 阈值走设备级覆盖（sensor_offline_seconds=5）。
+ * ⑤ 无效上报值（断线回 0xFFFF，见 `sensor_data_mapper.invalid_value`）按缺测处理
  */
 const D_NO = 'E2E_OFF'
 const API = 'http://127.0.0.1:10452/api'
@@ -45,6 +46,19 @@ const reset = () =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ d_no: D_NO }),
   }).catch(() => undefined)
+
+// 无效上报值清单（与 docs/API-CHANGES.md 的迁移 SQL 一致）：本脚本自包含，不依赖手工迁移
+const INVALID_VALUES = [
+  ['temp_in', '[6553.5]'],
+  ['temp_out', '[6553.5]'],
+  ['heat_Y1', '[65535]'],
+  ['water_Y2', '[65535]'],
+  ['flow_rate', '[655.35]'],
+  ['pressure', '[6553.5]'],
+]
+for (const [apiName, invalid] of INVALID_VALUES) {
+  await q('UPDATE sensor_data_mapper SET invalid_value = ? WHERE api_name = ?', [invalid, apiName])
+}
 
 await reset()
 for (const table of ['direct', 'error_msg', 'control_log', 'sensor_data', 'device_locks']) {
@@ -133,11 +147,15 @@ result.phase3 = {
 const twice = await waitFor(async () => (await offlineRows()) === 2, 25_000)
 result.phase4 = { rows: await offlineRows(), twice }
 
-// ---------- ⑤ 传感器离线哨兵值（0xFFFF/10 = 6553.5）→ 按缺测处理 ----------
+// ---------- ⑤ 无效上报值（断线回 0xFFFF）→ 按缺测处理 ----------
 // 期望：该列不入库（NULL）、WS 推送里该字段为空串（前端与自动控制均按缺测）
+// 字段倍率不同：温度/压力 6553.5、瞬时流量 655.35、开关 65535（见 sensor_data_mapper.invalid_value）
 const tempCol =
   (await q("SELECT db_name FROM sensor_data_mapper WHERE api_name = 'temp_in' LIMIT 1"))[0]
     ?.db_name ?? 'field1'
+const heatCol =
+  (await q("SELECT db_name FROM sensor_data_mapper WHERE api_name = 'heat_Y1' LIMIT 1"))[0]
+    ?.db_name ?? 'field3'
 const from5 = events.length
 await new Promise((resolve) => {
   pub.publish(
@@ -147,8 +165,8 @@ await new Promise((resolve) => {
       time: nowStr(),
       temp_in: 6553.5,
       temp_out: 6553.5,
-      heat_Y1: 0,
-      water_Y2: 0,
+      heat_Y1: 65535,
+      water_Y2: 65535,
       flow_rate: 0,
       pressure: 5,
     }),
@@ -158,7 +176,7 @@ await new Promise((resolve) => {
 await sleep(1500)
 const sentinelRow = (
   await q(
-    `SELECT \`${tempCol}\` AS tempIn FROM sensor_data WHERE d_no = ? ORDER BY id DESC LIMIT 1`,
+    `SELECT \`${tempCol}\` AS tempIn, \`${heatCol}\` AS heat FROM sensor_data WHERE d_no = ? ORDER BY id DESC LIMIT 1`,
     [D_NO],
   )
 )[0]
@@ -166,7 +184,9 @@ const sentinelWs = events.slice(from5).find((e) => e.data?.d_no === D_NO)?.data 
 result.phase5 = {
   rows: Number((await q('SELECT COUNT(*) AS c FROM sensor_data WHERE d_no = ?', [D_NO]))[0].c),
   tempIn: sentinelRow?.tempIn ?? null,
+  heat: sentinelRow?.heat ?? null,
   wsTempIn: sentinelWs?.wen_du1 ?? null,
+  wsHeat: sentinelWs?.jia_re ?? null,
 }
 
 // ---------- 清理 ----------
@@ -194,8 +214,12 @@ check(
 check('② 持续离线不重复告警', result.phase2.rows === 1)
 check('③ 恢复上报 → 推送 type=reset 事件', result.phase3.event?.data?.type === 'reset')
 check('④ 再次离线 → 可再次告警', result.phase4.rows === 2)
-check('⑤ 离线哨兵值 6553.5 不入库（列为 NULL）', result.phase5.tempIn === null)
+check('⑤ 无效上报值 6553.5 不入库（列为 NULL）', result.phase5.tempIn === null)
 check('⑤ WS 推送中该字段为空串（按缺测）', result.phase5.wsTempIn === '')
+check(
+  '⑤ 开关类无效值 65535 不入库 + WS 推空串',
+  result.phase5.heat === null && result.phase5.wsHeat === '',
+)
 
 console.log('\n汇总:', JSON.stringify(result))
 if (checks.some((c) => !c.ok)) {

@@ -132,9 +132,10 @@
   - 可自恢复的两类补**解除**推送（`type:'reset'` + `category:'release'`，前端清横幅）：`pump_idle_release`（流量恢复）、`reverse_temp_release`（温差恢复 / 停止加热）；缺测只静默重置
   - 引擎 `blockDevice`：`blocked` 锁已存在时不再重复 acquire；手动复位补写 `error_msg(category='release', code='block_release')`
   - **颜色/分类约定**：堵塞类 `error` 红 + `field3='block'`；解除类 `warning` 黄 + 独立 `field3='release'` + `type='reset'`（修「压力解锁被当堵塞染红」）
-- [x] **传感器离线哨兵值剔除**（2026-09-14）：设备传感器断线时上报 **6553.5**（= 0xFFFF/10，实测 `temp_in`/`temp_out` 各 41~42 帧，其余字段正常），原先会当作**真实温度**进入自动控制（超温关加热、温度异常判堵塞）与前端曲线。现于**数据入口**（`sensorModule.process` 首行）统一剔除为**空串**（缺测）
+- [x] **无效上报值剔除**（2026-09-14 首版 → 2026-09-15 改为数据库驱动）：设备断线时回 **0xFFFF**，而各字段倍率不同 —— 实测（`logs/latest.log`，2026-09-15）温度/压力 → **6553.5**、瞬时流量 → **655.35**、**开关（`heat_Y1`/`water_Y2`）→ 65535**。原先会当作真实值进入自动控制（超温关加热、温度异常判堵塞）、前端曲线与落库
+  - 判定清单**落在数据库**：`sensor_data_mapper.invalid_value`（JSON 数组，逐字段配置；空/NULL = 不判定）；数据入口（`sensorModule.process`）按 mapper 剔除为**空串**（缺测），代码内不再写死哨兵常量
   - 下游天然一致：`toNum('')` → null（组件按缺测跳过）、`buildSensorRow` 跳过空值（该列**落库为 NULL**）、`pushSample`/`accumulateFlow` 跳过 null ⇒ 一处生效
-  - 覆盖字段：`temp_in` / `temp_out` / `pressure` / `flow_rate`（开关类字段不参与）；哨兵常量 `OFFLINE_SENTINELS = [65535, 6553.5]`（`sensorModule/utils.ts`）
+  - 开关字段也纳入（旧版只覆盖四个测量量 ⇒ 65535 会一路进 WS `jia_re`/`shui_beng` 与 `field3`/`field4`）；设备状态同步对缺测本就跳过（`reportedState('')` → undefined），剔除后不再被 65535 误判为「泵/加热已关」
 - [x] 设备状态同步（已实现）：设备上报开关状态与 `direct` 指令值**连续 `device_sync_frames` 帧不一致** → 以**设备实际状态**为准回写（写 direct + 下发 + `source='device'` 通知 + `control_log(field1='device')` + `device_sync` 告警）；指令值一变化即重新计数（避免下发的控制被设备上报滞后同步回去）；**默认 0（关闭）**，可按设备启用
 - [x] 关泵连带关加热（两层防护，已实现）：① 引擎统一规则 —— 任何「关泵」动作若加热仍开，自动在其前面补一条「关加热」（按序跟踪，决策自身已关加热时不重复下发）；② 状态兜底 —— 水泵停止（**指令值或上报泵状态任一为「泵停」**）且加热仍开 → 立即关加热（不受启动宽限期影响，放在决策之后执行避免重复写库）
 - [x] 数据质量标记 `WsData.invalid`（已实现）：**阈值配置化**（`sensor_spike_temp`(10°C)/`sensor_spike_pressure`(20kPa)/`sensor_spike_flow`(100L/min)）+ **多帧累计防抖**（`sensor_spike_frames`，默认 0=关闭，连续 N 帧跳变才标记 invalid，恢复正常即清除）；缺测不算跳变；只在 WS `data` 上标记（前端曲线标注），不影响落库与控制
