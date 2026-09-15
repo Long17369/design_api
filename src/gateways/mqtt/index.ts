@@ -35,6 +35,16 @@ export class MqttGateway implements Closable {
         this.sendMessage(data)
       }),
     )
+    this.unsubscribers.push(
+      bus.onEvent('CONFIG_CHANGED', ({ changed, config, report }) => {
+        if (!changed.some((item) => item.section === 'mqtt')) return
+        logger.info(
+          `配置热更新：按新配置重连 broker ${config.mqtt.mqtt_host}:${config.mqtt.mqtt_port}`,
+        )
+        this.setConfig(config.mqtt)
+        report('mqtt', 'applied')
+      }),
+    )
   }
 
   public setConfig(config: MQTTConfig) {

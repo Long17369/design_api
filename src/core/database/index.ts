@@ -44,6 +44,12 @@ export class Database implements Closable {
       bus.onEvent('shutdown', () => {
         this.close()
       }),
+      bus.onEvent('CONFIG_CHANGED', ({ changed, report }) => {
+        if (!changed.some((item) => item.section === 'database')) return
+        // 热重连需先串行化在途写入（避免连接被替换时丢写），暂交由整体 restart()
+        logger.warn('配置热更新：database 变化需完整 restart()（热重连待补串行化）')
+        report('database', 'restart-required')
+      }),
     )
   }
 

@@ -23,6 +23,7 @@
 | `tests/core/chart.test.ts`                   | 桶步长边界（向上取整/最小 1s）、SQL 结构与参数顺序、客户端 URL 与别名                                                             |
 | `tests/core/where.test.ts`                   | WHERE 操作符：四组形态的 SQL 与参数（单值/集合/区间/空值）、非法值与未知操作符抛错、列白名单、分页参数顺序、`parseWhere` 400 校验 |
 | `tests/core/wsUrl.test.ts`                   | WS 契约接口：`WS_PATH` 与后端路径一致、`connectWebSocket` 返回连接实例（含 `location` 拼地址/无 location 报错）                   |
+| `tests/core/configReload.test.ts`            | 配置热更新协议：按已注册 section 的 diff（深比较/归属标注）、广播与回报、超时兜底按未生效、重复/非本次变更回报忽略       |
 | `tests/core/typesIsolation.test.ts`          | 契约目录纯净性：`src/types/` 内只允许 `./` 引用，出现外部引用即失败                                                               |
 | `tests/directModule/configHierarchy.test.ts` | 配置层级门控（递归隐藏、`\|` 多值、父值回退 `default_value`）                                                                     |
 

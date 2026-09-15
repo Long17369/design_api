@@ -213,11 +213,12 @@
   - 运行期：消费方在构造时 `registerConfigSection({ name, owner })` 自行登记（`Database` / `MqttGateway` / `HttpServer` 各登记自己那一段）；`getConfigSections()` 查询
   - 同名覆盖 ⇒ 进程内重启重建组件、重新登记，不会重复累积
   - 对比：`tables/`、`autoControl/components/` 是「集中注册表 + 单项文件」，此处因 section 归属不同层的组件（core / gateways）而改为**消费方自注册**
-- [ ] **配置热更新 `reloadConfig()`：只做到 diff，应用逻辑待补**（2026-09-15）
-  - [x] 已完成：重新读取配置文件 → 按**已注册**的 section 深比较（`@core/config/utils::diffConfigSections`）→ 返回 `{ changed: [{ section, owner }], applied: false }`
-  - [ ] **通知机制**：Server 只广播变更（如 bus 新增 `CONFIG_CHANGED`），**归属组件订阅后自行应用**（Server 不越权代改）
-  - [ ] **各 section 的应用方式**：`mqtt` → `MqttGateway.setConfig()`（重连 broker 并重订阅主题）；`database` → `Database.setConfig()`（重连，需先确认无在途写入）；**`port` 不可热更**（HTTP 监听需重建 socket），只能按「需完整 `restart()`」处理
-  - [ ] **`this.config` 更新时机**：待各 section 确认应用成功后再更新，否则下次 diff 会漏报（当前一律不更新，保持「当前配置 = 实际生效配置」）
+- [x] **配置热更新 `reloadConfig()`：广播变更 + 等回报 + 按 section 回写**（2026-09-15）
+  - [x] 重新读取配置文件 → 按**已注册**的 section 深比较（`@core/config/utils::diffConfigSections`）
+  - [x] **通知机制**：Server 广播 `CONFIG_CHANGED`（载荷 `{ changed, config, report }`），**归属组件订阅后自行应用**（Server 不越权代改）；`applyConfigChanges()` 负责广播 → 等回报 → 超时 `CONFIG_APPLY_TIMEOUT_MS`(3s) 未回报**按未生效处理**
+  - [x] **各 section 的应用方式**：`mqtt` → `MqttGateway.setConfig()` 重连 broker 并重订阅（回报 `applied`）；`port` → `HttpServer` 回报 `restart-required`（监听 socket 需重建）；`database` → 暂回报 `restart-required`
+  - [x] **`this.config` 更新时机**：只回写**已生效**的 section ⇒ 未生效的下次 diff 仍能发现，不会漏报
+  - [ ] **`database` 热重连**（待补）：需先给 `Database` 加「在途操作闸门」（重连前等在途查询/写入结束），改为回报 `applied`
   - [ ] **进程级单例**（`@core/cache` / `@core/locks`）在进程内重启时不重置 —— 与真实进程重启行为不同，需评估是否由归属模块在 `restart()` 时显式清理
 - [ ] **重启 / 热更新的调用入口**：暂**不暴露 HTTP**，仅供 CLI 使用；CLI 子命令（如 `restart` / `reload`）**暂不实现具体调用**
 

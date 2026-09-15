@@ -34,4 +34,26 @@ declare module '@core/config' {
     /** 该 section 的归属组件（应用者） */
     owner: string
   }
+
+  /**
+   * section 应用结果（归属组件应用完自己的 section 后回报）：
+   * `applied` 已按新配置生效 / `failed` 应用失败 / `restart-required` 需完整 `restart()`
+   */
+  type ConfigApplyStatus = 'applied' | 'failed' | 'restart-required'
+
+  /** 热更新事件载荷（`Server` 广播；section 归属组件订阅后自行应用并回报结果） */
+  interface ConfigChangedPayload {
+    /** 本次变更的 section（含归属组件） */
+    changed: ConfigChange[]
+    /** 新配置（组件只取自己负责的 section） */
+    config: Config
+    /** 应用结果回报：组件处理完自己的 section 后调用**一次**；超时未回报按 `failed` 处理 */
+    report: (section: ConfigSectionName, status: ConfigApplyStatus) => void
+  }
+}
+
+declare module '@core/bus' {
+  interface EventHandlerMapper {
+    CONFIG_CHANGED: import('@core/config').ConfigChangedPayload
+  }
 }
