@@ -30,16 +30,47 @@ pnpm dev -h                     # 显示帮助并退出
 - `h` / `help`：显示运行中命令清单 + 启动帮助
 
 命令大小写不敏感，短名与全名等价（`restart` 除外）。
+多行粘贴 / 快速输入时命令**按输入顺序逐条执行**（内部串行队列），不会交错。
+
+## 终端布局
+
+启动后终端被分为两块（采用终端控制符，无第三方库）：
+
+```text
+┌─ 日志区（滚动区，占满上方）──────────┐
+│ [INFO] …服务日志、命令输出的结果都在这里 │
+│ > u                                   │  ← 命令回显（暗色）
+├─ 状态行（倒数第二行，暗色）──────────┤
+│ http://localhost:10452/api  h=帮助 …  │
+├─ 输入行（最后一行）─────────────────┤
+│ > _                                   │
+└──────────────────────────────────────┘
+```
+
+- 滚动区由 `ESC[1;<rows-2>r` 设定，因此日志换行**只会让日志区上滚**，底部两行纹丝不动；
+- 日志（含 INFO）经 `@core/logger::setConsoleSink` 接入日志区 —— 输入与日志互不干扰；
+  文件日志（`logs/latest.log`）仍全量写入；
+- 退出（`q` / Ctrl+C）时复位滚动区、清掉底部两行并关闭原始模式，之后的日志回到普通输出。
+
+输入行支持的按键：
+
+- 左右方向键、`Home` / `End`、`Backspace` / `Delete`
+- `Ctrl+A` / `Ctrl+E`：行首 / 行尾；`Ctrl+U` / `Ctrl+K`：删除光标前 / 后内容
+- `↑` / `↓`：浏览历史命令（最多保留 100 条）
+- `Ctrl+L`：清屏（保留底部布局）；`Ctrl+C`：优雅退出
 
 ## 非交互场景
 
-stdin 不是 TTY 时（`pnpm dev > logs/latest.log`、被进程管理器拉起）**不会**接管输入、
-不启动命令循环，服务照常运行；此时用 `SIGINT` / `SIGTERM` 退出（入口带 3s 兜底强退）。
+stdin 不是 TTY 或终端过小时（`pnpm dev > logs/latest.log`、被进程管理器拉起）**不会**接管
+终端：不进入布局、不改动日志输出、不启动命令循环，服务照常运行；此时用 `SIGINT` /
+`SIGTERM` 退出（入口带 3s 兜底强退）。
 
 ## 实现位置
 
-- `src/main.ts`：入口 —— 解析参数、信号处理、把 `Server` 适配成 `CliHost` 后接管交互
+- `src/main.ts`：入口 —— 解析参数、信号处理、把 `Server` 适配成 `CliHost` 后接管终端
 - `src/cli/utils.ts`：`parseArgs` / `COMMANDS` / `resolveCommand` / `helpText` / `USAGE`（纯函数）
-- `src/cli/index.ts`：`Cli` 类（readline 交互循环 + 命令执行；只依赖 `CliHost`，与编排解耦）
+- `src/cli/screen.ts`：`Screen` —— 终端布局（滚动区 / 底部两行 / 行编辑与历史 / 尺寸变化）
+- `src/cli/index.ts`：`Cli` —— 命令队列与执行、把日志接入日志区（只依赖 `CliHost`，与编排解耦）
+- `src/core/logger`：控制台输出接收器 `setConsoleSink`（文件输出不受影响）
 
 命令清单、帮助文本、命令解析共用 `COMMANDS` 一份定义，新增命令只需改这一处。
