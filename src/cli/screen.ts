@@ -16,6 +16,9 @@ const ESC = '\u001b['
 const RESET_ATTR = `${ESC}0m`
 const DIM = `${ESC}2m`
 
+/** 与 `clear` 命令一致：光标归位 + 清屏 + 清回滚缓冲 */
+const CLEAR_ALL = '\u001b[H\u001b[2J\u001b[3J'
+
 /**
  * 终端布局：**底部固定状态行 + 输入行，其余行作为日志滚动区**。
  *
@@ -40,6 +43,8 @@ export class Screen {
   /** 终端尺寸（每行/列号都是 1 起） */
   private rows = 24
   private cols = 80
+  /** 下一条日志的落点行（绝对行号，1 起）；> 滚动区底行表示需先上滚 */
+  private logRow = 1
   private active = false
   private onKeypress: ((str: string | undefined, key: readline.Key) => void) | null = null
   private onResize: (() => void) | null = null
@@ -64,6 +69,8 @@ export class Screen {
 
     this.active = true
     this.applyScrollRegion()
+    // 继续接在既有输出之后（从滚动区底行起写，写满再上滚）
+    this.logRow = this.regionBottom()
     this.input.setRawMode(true)
     this.input.resume()
     readline.emitKeypressEvents(this.input)
@@ -89,15 +96,28 @@ export class Screen {
     )
   }
 
-  /** 写入日志/命令输出：进滚动区，底部固定区不受影响 */
+  /**
+   * 写入日志/命令输出：从滚动区**当前落点**向下写，写满后在滚动区内上滚；底部固定区不受影响。
+   * 落点由 `logRow` 跟踪 —— `clear` 后回到滚动区首行，避免从底行往上“撑”出一片空行。
+   */
   public print(text: string): void {
     if (!this.active) {
       this.output.write(`${text}\n`)
       return
     }
-    // 跳到滚动区底行 → 清掉其在屏上残留 → 写文本（末尾换行触发滚动区上滚）→ 重绘底部
-    this.output.write(`${RESET_ATTR}${ESC}${this.regionBottom()};1H${ESC}0J${text}\n`)
+    for (const line of text.split('\n')) this.appendLine(line)
     this.redraw()
+  }
+
+  /** 追加一行到日志区：落点到底行之后，先在底行换行（整区上滚一行）再写 */
+  private appendLine(line: string): void {
+    const bottom = this.regionBottom()
+    if (this.logRow > bottom) {
+      this.output.write(`${ESC}${bottom};1H\n`)
+      this.logRow = bottom
+    }
+    this.output.write(`${RESET_ATTR}${ESC}${this.logRow};1H${ESC}2K${line}`)
+    this.logRow++
   }
 
   /** 更新状态行内容（立即重绘） */
@@ -105,14 +125,18 @@ export class Screen {
     if (this.active) this.redrawStatus()
   }
 
-  /** 清屏（保留底部布局） */
+  /**
+   * 清屏：与 `clear` 命令一致 —— **光标归位 + 清屏 + 清回滚缓冲**，
+   * 随后日志从滚动区**首行**向下写（否则会从底行往上撑出一片空行）。
+   */
   public clear(): void {
     if (!this.active) {
-      this.output.write('\u001b[2J\u001b[3J\u001b[H')
+      this.output.write(CLEAR_ALL)
       return
     }
-    this.output.write(`${RESET_ATTR}${ESC}2J${ESC}H`)
+    this.output.write(`${RESET_ATTR}${CLEAR_ALL}`)
     this.applyScrollRegion()
+    this.logRow = 1
     this.redraw()
   }
 
@@ -169,6 +193,7 @@ export class Screen {
   private handleResize(): void {
     this.measure()
     this.applyScrollRegion()
+    this.logRow = Math.min(this.logRow, this.regionBottom())
     this.redraw()
   }
 

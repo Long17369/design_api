@@ -145,6 +145,63 @@ describe('Screen 布局（滚动区 + 底部固定两行）', () => {
     expect(text).toContain(`${ESC}29;1H`)
     expect(text).toContain(`${ESC}30;1H`)
   })
+
+  it('日志按落点逐行向下写，写满后才上滚', () => {
+    const { screen, output } = makeScreen()
+    screen.attach()
+
+    // attach 后落点接在既有输出之后（滚动区底行 22）
+    output.reset()
+    screen.print('第 1 条')
+    expect(output.text()).toContain(`${ESC}22;1H${ESC}2K第 1 条`)
+
+    // 落点已越过底行 → 先在底行换行（上滚一行）再写
+    output.reset()
+    screen.print('第 2 条')
+    const text = output.text()
+    expect(text).toContain(`${ESC}22;1H\n`) // 上滚
+    expect(text).toContain(`${ESC}22;1H${ESC}2K第 2 条`)
+  })
+
+  it('clear：与 clear 命令同序列（归位 + 清屏 + 清回滚）', () => {
+    const { screen, output } = makeScreen()
+    screen.attach()
+    output.reset()
+
+    screen.clear()
+
+    expect(output.text()).toContain('\u001b[H\u001b[2J\u001b[3J')
+    expect(output.text()).toContain(`${ESC}1;22r`) // 重新设定滚动区
+  })
+
+  it('clear 后日志从滚动区首行往下写（不再从底行撑出空行）', () => {
+    const { screen, output } = makeScreen()
+    screen.attach()
+    screen.print('清屏前的日志') // 落点已在底行
+    screen.clear()
+    output.reset()
+
+    screen.print('清屏后第 1 条')
+    expect(output.text()).toContain(`${ESC}1;1H${ESC}2K清屏后第 1 条`)
+
+    output.reset()
+    screen.print('清屏后第 2 条')
+    expect(output.text()).toContain(`${ESC}2;1H${ESC}2K清屏后第 2 条`)
+  })
+
+  it('多行文本逐行推进落点', () => {
+    const { screen, output } = makeScreen()
+    screen.attach()
+    screen.clear()
+    output.reset()
+
+    screen.print('A\nB\nC')
+
+    const text = output.text()
+    expect(text).toContain(`${ESC}1;1H${ESC}2KA`)
+    expect(text).toContain(`${ESC}2;1H${ESC}2KB`)
+    expect(text).toContain(`${ESC}3;1H${ESC}2KC`)
+  })
 })
 
 describe('Screen 输入（行编辑与历史）', () => {
