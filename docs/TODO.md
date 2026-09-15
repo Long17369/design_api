@@ -204,6 +204,11 @@
   - 新增配置项 `database.connection_limit`（schema 默认 `10`）；`maxIdle` / `idleTimeout`(60s) 回收空闲连接，`enableKeepAlive`(首次探测 10s) 尽早发现断链
   - 每条**新建**连接做一次会话初始化（`SET time_zone`）⇒ 换连接（含断后重建）行为一致
   - 验证：`tests/e2e/db_pool.ts`（真实库）—— `limit=1` 时初始化未完成即发起 20 并发全部成功、`limit=5` 20 并发、读写混合并发、`close()` 释放池
+- [x] **连接断开自动重连**（2026-09-15，分支 `refactor/database-pool`）：断链自愈，不用重启进程
+  - **读操作**（`executeQuery`/`count`/`timeRange`/`chart`）遇连接类错误（`PROTOCOL_CONNECTION_LOST` / `ECONNRESET` / `EPIPE` / `ETIMEDOUT`）**重试一次**（坏连接已由池剔除，重跑即拿到新连接）；**写操作不重试**（避免重复写入），错误上抛由调用方处理
+  - **健康巡检**：`checkHealth()` 每 30s 探活（`setInterval` + `unref`），失败即 `reconnect()`；初始化中 / 正在重连 / 已关闭时**跳过**（不与它们抢连接）
+  - **时机与失败兜底**：初始化失败即关掉半成品池（不留坏连接）；`ensureReady()` 只在「初始化/重连进行中」等待，结束后仍未就绪则**直接报错**（不再无限自旋卡死请求），由巡检每 30s 重试到数据库恢复
+  - 验证：`tests/core/databaseRetry.test.ts`（策略单测：读重试/写不重试/巡检跳过时机/关闭后快速失败）、`tests/e2e/db_recovery.ts`（真实库 + 本地 TCP 代理掐断连接）
 
 ## 服务编排与生命周期（`src/server.ts`）
 

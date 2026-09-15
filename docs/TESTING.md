@@ -29,6 +29,7 @@
 | `tests/cli/screen.test.ts`                   | 终端布局引擎：滚动区设定/复位、底部两行重绘、日志进滚动区、尺寸变化、非 TTY 退化；行编辑与历史                                                                   |
 | `tests/core/configReload.test.ts`            | 配置热更新协议：按已注册 section 的 diff（深比较/归属标注）、广播与回报、超时兜底按未生效、重复/非本次变更回报忽略                                               |
 | `tests/core/locks.test.ts`                   | 锁通道：`reset()` 清空内存锁与快照、不广播（供进程内重启对齐真实重启语义）                                                                                       |
+| `tests/core/databaseRetry.test.ts`           | 连接断开自愈：读操作重试一次（连接类错误）、写操作不重试、非连接类错误不重试、`checkHealth` 探活与跳过时机、关闭后快速失败                                       |
 | `tests/core/typesIsolation.test.ts`          | 契约目录纯净性：`src/types/` 内只允许 `./` 引用，出现外部引用即失败                                                                                              |
 | `tests/directModule/configHierarchy.test.ts` | 配置层级门控（递归隐藏、`\|` 多值、父值回退 `default_value`）                                                                                                    |
 
@@ -46,26 +47,28 @@ pnpm exec tsx tests/e2e/blocked_bus.ts                # 总线级（进程内构
 pnpm exec tsx tests/e2e/ws_path.ts                    # WS 路径锁定（进程内起临时端口，什么都不依赖）
 pnpm exec tsx tests/e2e/verify_seeds.ts               # seeds 等价性（只需数据库）
 pnpm exec tsx tests/e2e/db_pool.ts                    # 连接池排队/释放（只需数据库）
+pnpm exec tsx tests/e2e/db_recovery.ts                # 连接断开自愈（只需数据库；自带 TCP 代理）
 ```
 
-| 脚本                                                                                                            | 覆盖                                                                                                 |
-| --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `blocked.mjs`                                                                                                   | 堵塞保护全链路（判堵塞 → 加锁 → WS → 复位）                                                          |
-| `frame_eval.mjs`                                                                                                | 每帧评估 + 组件自幂等                                                                                |
-| `control.mjs` / `dispatch.mjs`                                                                                  | 手动控制与拒绝、指令下发（Modbus 帧）                                                                |
-| `temp_limit.mjs` / `pump_heat.mjs` / `pump_idle.mjs` / `overpressure.mjs` / `reverse_temp.mjs` / `pid_temp.mjs` | 各保护组件（恒温、关泵连带关加热、空转去抖、过压冷却期、逆温差、PID PWM）                            |
-| `flow_target.mjs` / `flow_resume.mjs`                                                                           | 累计流量目标、累计流量重启续算（两阶段）                                                             |
-| `device_override.mjs`                                                                                           | 设备级配置覆盖优先级（前端改配置立即生效）                                                           |
-| `device_sync.mjs` / `sensor_offline.mjs` / `sensor_spike.mjs`                                                   | 设备状态回写、离线告警（含无效上报值 6553.5/65535 按缺测不入库）、跳变标记                           |
-| `ws_push.mjs`                                                                                                   | WS 定向推送与重连（`goal`）                                                                          |
-| `chart.mjs`                                                                                                     | 历史图表降采样接口                                                                                   |
-| `config_hierarchy.mjs`                                                                                          | 配置项层级门控（`GET /api/direct/config?d_no=`）                                                     |
-| `blocked_bus.ts`                                                                                                | 总线级堵塞联动（进程内构造模块）                                                                     |
-| `ws_path.ts`                                                                                                    | WS 路径锁定 + 契约 `connectWebSocket(goal?)` 建连（其它路径 400；进程内临时端口）                    |
-| `lock_persist_a.mjs` / `lock_persist_b.mjs`                                                                     | 锁持久化：A 触发并落库 → B 重启后恢复与开泵拦截（两阶段）                                            |
-| `verify_seeds.ts` / `print_configs.ts`                                                                          | seeds 等价性校验 / 打印指令配置列表（排查工具）                                                      |
-| `db_pool.ts`                                                                                                    | 连接池：小池下并发排队等待（不丢请求）、初始化未就绪即发起时的等待、`close()` 释放（**只需数据库**） |
-| `pid_calib.mjs`                                                                                                 | PID 控温「稳在目标」标定/验收统计（**只读、不起服务**；读数占比/带宽/静态偏差/duty 分布）            |
+| 脚本                                                                                                            | 覆盖                                                                                                                                              |
+| --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `blocked.mjs`                                                                                                   | 堵塞保护全链路（判堵塞 → 加锁 → WS → 复位）                                                                                                       |
+| `frame_eval.mjs`                                                                                                | 每帧评估 + 组件自幂等                                                                                                                             |
+| `control.mjs` / `dispatch.mjs`                                                                                  | 手动控制与拒绝、指令下发（Modbus 帧）                                                                                                             |
+| `temp_limit.mjs` / `pump_heat.mjs` / `pump_idle.mjs` / `overpressure.mjs` / `reverse_temp.mjs` / `pid_temp.mjs` | 各保护组件（恒温、关泵连带关加热、空转去抖、过压冷却期、逆温差、PID PWM）                                                                         |
+| `flow_target.mjs` / `flow_resume.mjs`                                                                           | 累计流量目标、累计流量重启续算（两阶段）                                                                                                          |
+| `device_override.mjs`                                                                                           | 设备级配置覆盖优先级（前端改配置立即生效）                                                                                                        |
+| `device_sync.mjs` / `sensor_offline.mjs` / `sensor_spike.mjs`                                                   | 设备状态回写、离线告警（含无效上报值 6553.5/65535 按缺测不入库）、跳变标记                                                                        |
+| `ws_push.mjs`                                                                                                   | WS 定向推送与重连（`goal`）                                                                                                                       |
+| `chart.mjs`                                                                                                     | 历史图表降采样接口                                                                                                                                |
+| `config_hierarchy.mjs`                                                                                          | 配置项层级门控（`GET /api/direct/config?d_no=`）                                                                                                  |
+| `blocked_bus.ts`                                                                                                | 总线级堵塞联动（进程内构造模块）                                                                                                                  |
+| `ws_path.ts`                                                                                                    | WS 路径锁定 + 契约 `connectWebSocket(goal?)` 建连（其它路径 400；进程内临时端口）                                                                 |
+| `lock_persist_a.mjs` / `lock_persist_b.mjs`                                                                     | 锁持久化：A 触发并落库 → B 重启后恢复与开泵拦截（两阶段）                                                                                         |
+| `verify_seeds.ts` / `print_configs.ts`                                                                          | seeds 等价性校验 / 打印指令配置列表（排查工具）                                                                                                   |
+| `db_pool.ts`                                                                                                    | 连接池：小池下并发排队等待（不丢请求）、初始化未就绪即发起时的等待、`close()` 释放（**只需数据库**）                                              |
+| `db_recovery.ts`                                                                                                | 连接断开自愈：读重试一次（新连接）、写不重试（错误上抛）、`checkHealth()` 自动重连、`close()` 后快速失败（**只需数据库**；自带 TCP 代理掐断连接） |
+| `pid_calib.mjs`                                                                                                 | PID 控温「稳在目标」标定/验收统计（**只读、不起服务**；读数占比/带宽/静态偏差/duty 分布）                                                         |
 
 注意：
 

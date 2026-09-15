@@ -36,6 +36,24 @@ const IDLE_TIMEOUT_MS = 60_000
 /** TCP 保活首次探测延迟(ms)：用于尽早发现断链 */
 const KEEP_ALIVE_INITIAL_DELAY_MS = 10_000
 
+/** 健康巡检间隔(ms)：定期探活，发现连接不可用即触发一次重连 */
+const HEALTH_CHECK_INTERVAL_MS = 30_000
+
+/** 连接类错误码：连接已断/不可用（据此判定「读操作可重试一次」） */
+const CONNECTION_LOST_CODES = new Set([
+  'PROTOCOL_CONNECTION_LOST',
+  'ECONNRESET',
+  'EPIPE',
+  'ETIMEDOUT',
+])
+
+/** 是否连接类错误（与 SQL 本身的语法/权限错误区分开） */
+function isConnectionLostError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const code = (err as { code?: unknown }).code
+  return typeof code === 'string' && CONNECTION_LOST_CODES.has(code)
+}
+
 /**
  * 池 `connection` 事件里收到的连接（回调式）。
  * mysql2 的 promise 池只转发底层事件（`inheritEvents`），实际拿到的是回调式连接，
@@ -63,6 +81,15 @@ export class Database implements Closable {
 
   /** 初始化进行中：init 内部的 SQL **不走重连闸门**（否则重连会等自己） */
   private initInProgress = false
+
+  /** 已关闭：不再巡检、不再自动重连（close() 后置位） */
+  private closing = false
+
+  /** 健康巡检定时器句柄 */
+  private healthTimer: ReturnType<typeof setInterval> | null = null
+
+  /** 巡检已判不可用（避免失败日志刷屏；恢复后清零） */
+  private healthDown = false
 
   /** 事件订阅注销句柄集合（强引用监听；close 时统一注销，解除 bus 对本实例的引用） */
   private readonly unsubscribers: Array<() => void> = []
@@ -119,12 +146,13 @@ export class Database implements Closable {
     }
   }
 
-  /** 初始化实现：建库 → 连接 → 建表/补列 → 种子同步 → 表工具（入口见 `init()`） */
+  /** 初始化实现：建库 → 连接池 → 建表/补列 → 种子同步 → 表工具（入口见 `init()`） */
   private async initInternal() {
     if (!this.config) {
       logger.error('数据库配置未设置')
       return Promise.reject(new Error('数据库配置未设置'))
     }
+    this.closing = false
     logger.info('初始化数据库...')
     try {
       // 1. 检查/创建数据库
@@ -140,8 +168,11 @@ export class Database implements Closable {
       // 5. 初始化各表的数据访问工具
       this.initTableTools()
       this.isInitialized = true
+      this.startHealthCheck()
     } catch (error) {
       logger.error(`数据库初始化失败: ${error}`)
+      // 失败就把半成品池关掉（不留坏连接）；就绪位保持 false ⇒ 请求快速失败，由巡检重试
+      await this.closeConnection().catch(() => undefined)
       throw error
     }
     logger.info('数据库初始化完成')
@@ -301,7 +332,10 @@ export class Database implements Closable {
   }
 
   /**
-   * 等待数据库就绪并返回**连接池**（池满时 `pool.query` 会自行排队等待）
+   * 等待数据库就绪并返回**连接池**（池满时 `pool.query` 会自行排队等待）。
+   *
+   * 初始化 / 热重连**进行中**就等它结束；结束后仍未就绪（如初始化失败、已关闭）
+   * 则**直接报错**，不做无限自旋（否则数据库长时间不可用会卡死所有请求）。
    * @returns 连接池
    */
   private async ensureReady(): Promise<mysql.Pool> {
@@ -309,23 +343,48 @@ export class Database implements Closable {
       logger.error('数据库配置未设置')
       throw new Error('数据库配置未设置')
     }
-    while (!this.isInitialized) {
+    while (this.initInProgress || this.reconnecting !== null) {
       await new Promise((resolve) => setTimeout(resolve, 100))
     }
-    if (!this.pool) {
-      logger.error('数据库连接池未初始化')
-      throw new Error('数据库连接池未初始化')
+    if (!this.isInitialized || !this.pool) {
+      logger.error('数据库未就绪')
+      throw new Error('数据库未就绪')
     }
     return this.pool
   }
 
   /**
    * 执行原始 SQL（内部使用），返回 [行结果, 字段信息]。
+   *
+   * 连接断开（`CONNECTION_LOST_CODES`）时**只有读操作**重试一次：坏连接已被连接池剔除，
+   * 重跑即拿新连接；写操作**绝不重试**（重跑可能重复写入），交由调用方处理。
+   *
+   * @param sql sql查询语句
+   * @param params sql查询参数
+   * @param retryOnLost 连接断开时是否重试一次（读操作传 true）
+   * @returns 查询结果
+   */
+  private async query(
+    sql: string,
+    params?: SqlValue[],
+    retryOnLost = false,
+  ): Promise<[unknown, unknown]> {
+    try {
+      return await this.runQuery(sql, params)
+    } catch (err) {
+      if (!retryOnLost || !isConnectionLostError(err)) throw err
+      logger.warn(`数据库连接断开，重试一次：${(err as Error).message}`)
+      return await this.runQuery(sql, params)
+    }
+  }
+
+  /**
+   * 执行一条 SQL：过热重连闸门 → 等就绪 → 取池执行（在途计数供重连闸门使用）
    * @param sql sql查询语句
    * @param params sql查询参数
    * @returns 查询结果
    */
-  private async query(sql: string, params?: SqlValue[]): Promise<[unknown, unknown]> {
+  private async runQuery(sql: string, params?: SqlValue[]): Promise<[unknown, unknown]> {
     // 热重连闸门：重连期间先等它结束（init 内部的 SQL 不走闸门，见 initInProgress）
     if (!this.initInProgress) {
       while (this.reconnecting !== null) await this.reconnecting
@@ -359,7 +418,7 @@ export class Database implements Closable {
   public async executeQuery<T = Record<string, unknown>>(options: DataQueryParams): Promise<T[]> {
     await this.ensureReady()
     const { sql, params } = buildQuerySQL(this.tables, options)
-    const [rows] = await this.query(sql, params)
+    const [rows] = await this.query(sql, params, true)
     return rows as T[]
   }
 
@@ -374,7 +433,7 @@ export class Database implements Closable {
     const info = findTableInfo(this.tables, table)
     const { sql: whereSQL, params } = buildWhereSQL(info, where)
     const sql = `SELECT COUNT(*) AS count FROM ${quote(info.name)}${whereSQL}`
-    const [rows] = await this.query(sql, params)
+    const [rows] = await this.query(sql, params, true)
     const row = (rows as Array<{ count: number }>)[0]
     return { count: Number(row?.count ?? 0) }
   }
@@ -397,7 +456,7 @@ export class Database implements Closable {
     }
     const { sql: whereSQL, params } = buildWhereSQL(info, where)
     const sql = `SELECT MIN(c_time) AS minTime, MAX(c_time) AS maxTime FROM ${quote(info.name)}${whereSQL}`
-    const [rows] = await this.query(sql, params)
+    const [rows] = await this.query(sql, params, true)
     const row = (rows as Array<{ minTime: string | null; maxTime: string | null }>)[0]
     return { minTime: row?.minTime ?? null, maxTime: row?.maxTime ?? null }
   }
@@ -415,7 +474,7 @@ export class Database implements Closable {
     await this.ensureReady()
     const info = findTableInfo(this.tables, table)
     const { sql, params: sqlParams } = buildChartSQL(info, params)
-    const [rows] = await this.query(sql, sqlParams)
+    const [rows] = await this.query(sql, sqlParams, true)
     return (rows as ChartPoint[] | undefined) ?? []
   }
 
@@ -597,9 +656,65 @@ export class Database implements Closable {
    * @returns
    */
   public async close() {
+    // 先置关闭位：巡检不再触发重连（重复 close 也安全）
+    this.closing = true
+    this.stopHealthCheck()
     // 统一注销所有事件订阅，释放 bus 对本实例的引用
     this.unsubscribers.splice(0).forEach((unsubscribe) => unsubscribe())
     await this.closeConnection()
+  }
+
+  /**
+   * 健康巡检一次：探活失败即热重连（连接断开自动恢复）。
+   *
+   * 时机：初始化中 / 正在重连 / 已关闭时**直接跳过**，避免与它们抢连接。
+   * @returns 探活最终是否可用（重连成功也算恢复；跳过的场合按当前就绪状态返回）
+   */
+  public async checkHealth(): Promise<boolean> {
+    if (this.initInProgress || this.reconnecting !== null || this.closing) return this.isInitialized
+    if (!this.isInitialized || !this.pool) return false
+    try {
+      await this.probe()
+      if (this.healthDown) {
+        this.healthDown = false
+        logger.info('数据库连接已恢复')
+      }
+      return true
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      if (!this.healthDown) {
+        this.healthDown = true
+        logger.warn(`数据库探活失败，开始重连：${message}`)
+      }
+      const config = this.config
+      if (!config) return false
+      try {
+        await this.reconnect(config)
+        this.healthDown = false
+        logger.info('数据库连接已恢复')
+        return true
+      } catch (reconnectErr) {
+        const reason = reconnectErr instanceof Error ? reconnectErr.message : String(reconnectErr)
+        logger.error(`数据库自动重连失败：${reason}`)
+        return false
+      }
+    }
+  }
+
+  /** 启动健康巡检（幂等：已在跑就不重复起；不阻止进程退出） */
+  private startHealthCheck(): void {
+    if (this.healthTimer) return
+    this.healthTimer = setInterval(() => {
+      void this.checkHealth()
+    }, HEALTH_CHECK_INTERVAL_MS)
+    this.healthTimer.unref()
+  }
+
+  /** 停止健康巡检 */
+  private stopHealthCheck(): void {
+    if (!this.healthTimer) return
+    clearInterval(this.healthTimer)
+    this.healthTimer = null
   }
 
   /**
