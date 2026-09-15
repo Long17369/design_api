@@ -25,6 +25,19 @@ export class LockManager {
   }
 
   /**
+   * 列出所有仍有有效锁的设备及其锁类型（按设备编号升序）。
+   * 供需要遍历「当前整体锁定状态」的场景使用（如新客户端上线补推）。
+   */
+  public listActive(): Array<{ d_no: string; active: LockType[] }> {
+    const result: Array<{ d_no: string; active: LockType[] }> = []
+    for (const d_no of [...this.locks.keys()].sort()) {
+      const active = this.getActive(d_no).map((lock) => lock.type)
+      if (active.length > 0) result.push({ d_no, active })
+    }
+    return result
+  }
+
+  /**
    * 获取指定类型的锁（**不过滤已过期**）。
    * 供需要感知「冷却期已结束」的调用方使用（如过压保护在处理解锁/顺延时），
    * 而 `getActive` 只用于「当前是否仍被限制」的判断。

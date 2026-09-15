@@ -83,7 +83,9 @@
 - `direct`：指令变更通知（`{d_no, config_id, value?, success, source?, error?}`）—— `success=false` 时前端可弹错误提示
 - `lock`：保护锁状态变更（`{d_no, locked, active[], type?, reason?, expiresAt?, timestamp}`）——
   `active` 为当前仍有效的锁类型（`blocked`/`overpressure`/`pump_idle`，空数组=已解锁；`leak` 为预留类型，当前不会出现）；
-  **同时**会补发一条 `direct`（`config_id='lock'`，`value='1'|'0'`），旧前端不改也能感知锁状态
+  **同时**会补发一条 `direct`（`config_id='lock'`，`value='1'|'0'`），旧前端不改也能感知锁状态；
+  **客户端连接（含重连）后会按当前锁状态定向补推**（已锁设备逐台发 `lock` + `direct`，无锁则不发）——
+  即「上线时锁已存在」（含服务重启后从 `device_locks` 恢复的锁）也能立刻拿到锁状态，无需等到下一次锁变化
 - 定向：服务端可按连接推送（`goal`），前端无需处理
 
 ## 前端适配清单
@@ -93,7 +95,8 @@
 3. 移除 `/api/device` 相关调用（设备管理）
 4. 控制页：`sendControlCommand` 响应/参数不变；失败时展示 `error.message`
 5. 数据页：`getDataMapper('data')`、`getData('data', ...)` 可保留（客户端别名），也可统一改为 `'sensor'`
-6. 可选：接入新 `lock` 事件做「设备已锁定」提示（不改也能靠 `direct` 里的 `config_id='lock'` 兼容）
+6. 可选：接入新 `lock` 事件做「设备已锁定」提示（不改也能靠 `direct` 里的 `config_id='lock'` 兼容）；
+   连接/重连后服务端会**定向补推当前锁状态**，前端无需自行查询
 7. 历史图表：`getChartData({ d_no, start, end, buckets })` 现已有后端实现（`/api/sensor/chart`），
    `DataChartView.vue` 可直接使用；如需其它域可传 `source: 'error' | 'control' | 'behavior'`
 8. **WebSocket 地址改为 `ws://<host>:<port>/api/ws`**（后端已固定该路径，旧的 `/ws` 不再可连）；

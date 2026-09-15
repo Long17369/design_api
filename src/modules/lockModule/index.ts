@@ -2,9 +2,10 @@ import { bus } from '@core/bus'
 import { log } from '@core/logger'
 import { Closable } from '@core/lifecycle'
 import { Database } from '@core/database'
-import { DeviceLock, LockChange, lockManager } from '@core/locks'
+import { DeviceLock, LockChange, LockType, lockManager } from '@core/locks'
 import { formatNow } from '@core/utils'
-import { WsDirectUpdate, WsLock } from '@/types/types'
+import { WsClientConnected } from '@gateways/websocket'
+import { WsDirectUpdate, WsLock, WsMessage } from '@/types/types'
 import { DeviceLockRow } from '.'
 import { LOCKS_QUERY, fromLockRow, lockKeyQuery, lockKeyWhere, toLockRow } from './utils'
 
@@ -16,6 +17,9 @@ const logger = log.getLogger('LockModule')
  *
  * - 订阅 `LOCK_CHANGED`：加锁 upsert 一行、解锁删除对应行；WS 推 `event='lock'`，
  *   并补一条 `event='direct'`（`config_id='lock'`）兼容只认 data/alarm/direct 的旧前端；
+ * - 订阅 `WS_CLIENT_CONNECTED`：为刚连接的客户端**定向补推**当前已锁设备 ——
+ *   锁变化发生在客户端上线/重连之前时（含服务重启后从 `device_locks` 恢复的锁），
+ *   前端只能靠这条拿到已存在的锁，否则要等到下一次锁变化；
  * - `setDatabase` 时从 `device_locks` 加载未过期锁（`lockManager.restore`，不广播），
  *   同时清理已过期行 —— 重启后「堵塞仍需手动复位」的记忆由此保留；
  * - 锁的权威状态仍在内存，落库只为重启恢复，写失败不影响控制语义（仅记日志）。
@@ -37,6 +41,9 @@ export class LockModule implements Closable {
       }),
       bus.onEvent('LOCK_CHANGED', (change) => {
         this.enqueue(change)
+      }),
+      bus.onEvent('WS_CLIENT_CONNECTED', (client) => {
+        this.pushCurrentLocks(client)
       }),
     )
   }
@@ -128,28 +135,51 @@ export class LockModule implements Closable {
     logger.info(`锁已持久化: [${lock.d_no}] ${lock.type}${lock.reason ? ` (${lock.reason})` : ''}`)
   }
 
-  /** 推送锁状态：新事件 `lock` + 兼容旧前端的 `direct`（config_id='lock'） */
+  /** 推送一次锁变化：新事件 `lock` + 兼容旧前端的 `direct`（config_id='lock'），广播给所有客户端 */
   private push(change: LockChange): void {
-    const locked = change.active.length > 0
-    const data: WsLock = {
-      d_no: change.d_no,
-      locked,
-      active: [...change.active],
-      timestamp: formatNow(),
-      ...(change.lock?.type !== undefined ? { type: change.lock.type } : {}),
-      ...(change.lock?.reason !== undefined ? { reason: change.lock.reason } : {}),
-      ...(change.lock?.expiresAt !== undefined ? { expiresAt: change.lock.expiresAt } : {}),
-    }
-    bus.emitEvent('WS_MESSAGE_OUT', { message: { event: 'lock', data } })
+    this.emitState(change.d_no, change.active, change.lock)
+    logger.debug(`锁状态已推送: ${change.d_no} ${change.action} [${change.active.join(',')}]`)
+  }
 
+  /** 为刚连接的客户端定向补推当前已锁设备（无锁则不发） */
+  private pushCurrentLocks(client: WsClientConnected): void {
+    const current = lockManager.listActive()
+    if (current.length === 0) return
+    for (const { d_no, active } of current) {
+      this.emitState(d_no, active, undefined, client.goal)
+    }
+    logger.info(`已补推锁状态 ${current.length} 条 → goal=${client.goal}`)
+  }
+
+  /**
+   * 组装并发出锁状态：`lock`（`locked`/`active[]`/可选 `type`/`reason`/`expiresAt`）
+   * 与兼容旧前端的 `direct`（`config_id='lock'`，`value='1'|'0'`）；
+   * 给了 `goal` 则定向给该连接，否则广播。
+   */
+  private emitState(d_no: string, active: LockType[], lock?: DeviceLock, goal?: string): void {
+    const locked = active.length > 0
+    const data: WsLock = {
+      d_no,
+      locked,
+      active: [...active],
+      timestamp: formatNow(),
+      ...(lock?.type !== undefined ? { type: lock.type } : {}),
+      ...(lock?.reason !== undefined ? { reason: lock.reason } : {}),
+      ...(lock?.expiresAt !== undefined ? { expiresAt: lock.expiresAt } : {}),
+    }
     const legacy: WsDirectUpdate = {
-      d_no: change.d_no,
+      d_no,
       config_id: 'lock',
       value: locked ? '1' : '0',
       source: 'auto',
       success: true,
     }
-    bus.emitEvent('WS_MESSAGE_OUT', { message: { event: 'direct', data: legacy } })
-    logger.debug(`锁状态已推送: ${change.d_no} ${change.action} [${change.active.join(',')}]`)
+
+    const emit = (message: WsMessage) => {
+      if (goal !== undefined) bus.emitEvent('WS_MESSAGE_OUT', { goal, message })
+      else bus.emitEvent('WS_MESSAGE_OUT', { message })
+    }
+    emit({ event: 'lock', data })
+    emit({ event: 'direct', data: legacy })
   }
 }

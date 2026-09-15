@@ -147,6 +147,7 @@
 - [x] 手动复位 `POST /api/control/reset`：释放锁 → 按快照恢复 heat/water → 写 `control_log` → 广播 `type:'reset'`
 - [x] 锁通道自带持久化（方案 A）：新增 `device_locks` 表（`d_no`/`type`/`reason`/`deny`/`snapshot`/`expires_at`/`c_time`）+ `LockModule`（订阅 `LOCK_CHANGED` 落库、启动加载未过期锁、清理过期行）；**堵塞标记彻底移出 `direct`/`direct_config`**
 - [x] WS 推送锁状态：锁变化广播 `event:'lock'`（`WsLock`：`locked`/`active`/`type`/`reason`/`expiresAt`），并补一条 `direct`（`config_id:'lock'`）兼容旧前端；前端据此显示「设备被锁定」
+- [x] 锁状态上线补推：`LockModule` 订阅 `WS_CLIENT_CONNECTED`，对新连接**定向补推**当前已锁设备的 `lock` + `direct`（数据源 `LockManager.listActive()`，无锁不推）——覆盖「锁在客户端上线/重连前就已存在」（含服务重启后从 `device_locks` 恢复的锁，`restore` 本身不广播）
 
 > 约定：组件需要保护性锁时**直接调用 `lockManager`**（锁上带快照），引擎不参与锁语义 ——
 > 不引入旧项目的「决策带 `lock`/`unlock`、引擎统一执行」那套重机制。
