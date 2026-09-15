@@ -219,8 +219,9 @@
   - [x] **各 section 的应用方式**：`mqtt` → `MqttGateway.setConfig()` 重连 broker 并重订阅（回报 `applied`）；`database` → `Database.reconnect()` 热重连（回报 `applied`）；`port` → `HttpServer` 回报 `restart-required`（监听 socket 需重建）
   - [x] **`this.config` 更新时机**：只回写**已生效**的 section ⇒ 未生效的下次 diff 仍能发现，不会漏报
   - [x] **`database` 热重连**：`Database.reconnect()` 带**在途操作闸门**（等在途 SQL 归零 → 关旧连接 → 按新配置重新初始化；期间新 SQL 在闸门等待，`isInitialized=false` 时 `ensureReady()` 自旋兜底），失败只回报 `failed`
-  - [ ] **进程级单例**（`@core/cache` / `@core/locks`）在进程内重启时不重置 —— 与真实进程重启行为不同，需评估是否由归属模块在 `restart()` 时显式清理
-- [ ] **重启 / 热更新的调用入口**：暂**不暴露 HTTP**，仅供 CLI 使用；CLI 子命令（如 `restart` / `reload`）**暂不实现具体调用**
+  - [x] **进程级单例重置**：`Server.restart()` 在重建组件前显式 `cache.clear()` + `lockManager.reset()`（`resetProcessSingletons()`）—— 与真实进程重启语义对齐
+    - `LockManager.reset()` 只清内存锁与快照、**不广播**；持久化记录（`device_locks`）不动 ⇒ 由重建后的 `LockModule` 恢复（重启后「已落库的锁还在、仅内存未落库的锁消失」）
+- [ ] **重启 / 热更新的调用入口**：暂**不暴露 HTTP**，仅供 CLI 使用；CLI 子命令（如 `restart` / `reload`）**暂不实现具体调用**（本次有意留后）
 
 ## 工程 / 工具 / 依赖
 

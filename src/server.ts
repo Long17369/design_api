@@ -1,7 +1,9 @@
 import { bus } from '@core/bus'
+import { cache } from '@core/cache'
 import { Config } from '@core/config'
 import type { ConfigApplyStatus, ConfigChange, ConfigSectionName } from '@core/config'
 import { applyConfigChanges, diffConfigSections } from '@core/config/utils'
+import { lockManager } from '@core/locks'
 import { Database } from '@core/database'
 import type { Closable } from '@core/lifecycle'
 import { log } from '@core/logger'
@@ -149,6 +151,10 @@ export class Server {
    * 与 `stop()` 的差别：`stop()` 是「为进程退出而关停」，不等各组件完成（由 `main.ts`
    * 的兜底超时保证退出）；`restart()` 需要**确定的完成信号**，故逐个 `await close()`。
    * 各组件 `close()` 幂等，且本方法不广播 `shutdown` 事件，因此不会与订阅关闭重复释放。
+   *
+   * 组件之外还有**进程级单例**（缓存 / 锁通道：随进程存活、不参与 close），此处显式重置，
+   * 让进程内重启用起来与真实进程重启一致 —— 锁的持久化记录不动，由重建后的 `LockModule`
+   * 从 `device_locks` 恢复。
    */
   public async restart(): Promise<void> {
     if (!this.started || this.stopped) {
@@ -158,8 +164,15 @@ export class Server {
     logger.info('正在重启服务（进程内重建）...')
     await this.closeAll()
     this.reset()
+    this.resetProcessSingletons()
     await this.start()
     logger.info('服务重启完成')
+  }
+
+  /** 重置进程级单例（不随组件 close 清空的内存态）：缓存 + 锁通道（含锁定前快照） */
+  private resetProcessSingletons(): void {
+    cache.clear()
+    lockManager.reset()
   }
 
   /**

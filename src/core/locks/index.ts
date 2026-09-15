@@ -74,6 +74,15 @@ export class LockManager {
     return this.snapshots.get(d_no)
   }
 
+  /**
+   * 清空全部锁与快照（供**进程内重启**对齐真实进程重启语义：内存态不跨生命周期）。
+   * 持久化记录（`device_locks`）不动 —— 重启后由 `LockModule` 重新 `restore()` 恢复。
+   */
+  public reset(): void {
+    this.locks.clear()
+    this.snapshots.clear()
+  }
+
   /** 清除设备锁定前状态快照（复位恢复完成后调用） */
   public clearSnapshot(d_no: string): void {
     this.snapshots.delete(d_no)
