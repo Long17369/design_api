@@ -8,6 +8,7 @@ import { Database } from '@core/database'
 import type { Closable } from '@core/lifecycle'
 import { log } from '@core/logger'
 import { HttpServer, MqttGateway, WebSocketServer } from '@gateways'
+import { API_BASE, WS_PATH } from '@gateways/utils'
 import { AlarmModule, AutoControlModule, DirectModule, LockModule, SensorModule } from '@modules'
 
 const logger = log.getLogger('Server')
@@ -33,6 +34,16 @@ export interface ReloadResult {
   failedSections: ConfigSectionName[]
   /** 不可热更、需完整 `restart()` 才能生效的 section（如 `port` / `database`） */
   pendingRestart: ConfigSectionName[]
+}
+
+/** 服务地址（CLI `u` 命令展示） */
+export interface ServiceEndpoint {
+  /** 服务名（HTTP / WebSocket / MQTT / MySQL） */
+  name: string
+  /** `listen` = 本服务监听；`connect` = 本服务连接的依赖 */
+  role: 'listen' | 'connect'
+  /** 地址 */
+  url: string
 }
 
 /**
@@ -173,6 +184,38 @@ export class Server {
   private resetProcessSingletons(): void {
     cache.clear()
     lockManager.reset()
+  }
+
+  /**
+   * 各服务地址（CLI `u` 命令展示）。
+   *
+   * 本服务监听的 HTTP / WebSocket 地址由 `@gateways/utils` 的 `API_BASE` / `WS_PATH`
+   * 派生（对外前缀的唯一来源）；MQTT / MySQL 属于本服务连接的依赖，取当前生效配置。
+   */
+  public endpoints(): ServiceEndpoint[] {
+    const endpoints: ServiceEndpoint[] = []
+    const port = this.config?.port
+    if (port !== undefined) {
+      endpoints.push({ name: 'HTTP', role: 'listen', url: `http://localhost:${port}${API_BASE}` })
+      endpoints.push({ name: 'WebSocket', role: 'listen', url: `ws://localhost:${port}${WS_PATH}` })
+    }
+    const mqtt = this.config?.mqtt
+    if (mqtt) {
+      endpoints.push({
+        name: 'MQTT',
+        role: 'connect',
+        url: `mqtt://${mqtt.mqtt_host}:${mqtt.mqtt_port}`,
+      })
+    }
+    const database = this.config?.database
+    if (database) {
+      endpoints.push({
+        name: 'MySQL',
+        role: 'connect',
+        url: `mysql://${database.host}:${database.port}/${database.database_name}`,
+      })
+    }
+    return endpoints
   }
 
   /**

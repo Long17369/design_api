@@ -1,5 +1,5 @@
 import { log } from '@core/logger'
-import { CliArgsError, USAGE, parseArgs } from './cli'
+import { Cli, CliArgsError, USAGE, parseArgs } from './cli'
 import { CliOptions } from './cli'
 import { Server } from './server'
 
@@ -33,9 +33,23 @@ const shutdown = (reason: string) => {
 process.on('SIGTERM', () => shutdown('SIGTERM'))
 process.on('SIGINT', () => shutdown('SIGINT'))
 
-logger.info(`启动服务（配置：${options.configPath}）`)
-server.start().catch((err: unknown) => {
-  const message = err instanceof Error ? err.message : String(err)
-  logger.error(`服务启动失败：${message}`)
-  process.exit(1)
+// 运行中命令（r/u/c/q + 全名 reload/urls/clear/quit/restart、h 帮助）：
+// Cli 只依赖这套适配器 —— 编排仍由 Server 负责
+const cli = new Cli({
+  reload: () => server.reloadConfig(),
+  restart: () => server.restart(),
+  stop: (reason) => shutdown(reason),
+  endpoints: () => server.endpoints(),
 })
+
+logger.info(`启动服务（配置：${options.configPath}）`)
+server
+  .start()
+  .then(() => {
+    cli.attach()
+  })
+  .catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err)
+    logger.error(`服务启动失败：${message}`)
+    process.exit(1)
+  })

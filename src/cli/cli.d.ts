@@ -18,4 +18,19 @@ declare module '@/cli' {
     /** 一行说明（帮助文本展示） */
     desc: string
   }
+
+  /**
+   * 运行中命令的执行目标：由入口（`main.ts`）用真实 `Server` 适配，
+   * 单测可注入替身 —— Cli 不直接依赖 Server。
+   */
+  interface CliHost {
+    /** 配置热更新 */
+    reload(): Promise<import('@/server').ReloadResult>
+    /** 进程内重启 */
+    restart(): Promise<void>
+    /** 优雅关闭（通知各组件释放资源） */
+    stop(reason: string): void
+    /** 各服务地址 */
+    endpoints(): import('@/server').ServiceEndpoint[]
+  }
 }

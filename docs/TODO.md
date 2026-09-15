@@ -221,7 +221,11 @@
   - [x] **`database` 热重连**：`Database.reconnect()` 带**在途操作闸门**（等在途 SQL 归零 → 关旧连接 → 按新配置重新初始化；期间新 SQL 在闸门等待，`isInitialized=false` 时 `ensureReady()` 自旋兜底），失败只回报 `failed`
   - [x] **进程级单例重置**：`Server.restart()` 在重建组件前显式 `cache.clear()` + `lockManager.reset()`（`resetProcessSingletons()`）—— 与真实进程重启语义对齐
     - `LockManager.reset()` 只清内存锁与快照、**不广播**；持久化记录（`device_locks`）不动 ⇒ 由重建后的 `LockModule` 恢复（重启后「已落库的锁还在、仅内存未落库的锁消失」）
-- [ ] **重启 / 热更新的调用入口**：暂**不暴露 HTTP**，仅供 CLI 使用；CLI 子命令（如 `restart` / `reload`）**暂不实现具体调用**（本次有意留后）
+- [x] **CLI（启动参数 + 运行中命令）**：**不暴露 HTTP**，仅命令行（用法见 `docs/CLI.md`）
+  - [x] 启动参数：位置参数 / `-c` / `--config` / `--config=` 指定配置文件（默认 `@root/config.json`），`-h` / `--help` 打印用法；未知参数或缺值 → 打印用法并以退出码 2 结束（`src/cli/utils.ts::parseArgs`）
+  - [x] 运行中命令（**仅 TTY** 下接管 stdin）：`r`/`reload` 热更新、`u`/`urls` 显示各服务地址、`c`/`clear` 清屏、`q`/`quit` 优雅退出；另有 `restart`（**仅全名**，进程内重启）与 `h`/`help`（命令清单 + 启动帮助）
+  - [x] `Cli` 只依赖 `CliHost` 适配器（`main.ts` 用真实 `Server` 适配）⇒ 交互逻辑与编排解耦，单测注入替身
+  - [x] 命令清单/解析/帮助共用 `utils::COMMANDS` 一份定义，新增命令只改一处
 
 ## 工程 / 工具 / 依赖
 

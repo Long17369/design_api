@@ -1,4 +1,4 @@
-import { CliOptions } from '.'
+import { CliCommandDef, CliOptions } from '.'
 
 /** 默认配置文件（相对进程工作目录，支持 `@root/` 别名） */
 export const DEFAULT_CONFIG_PATH = '@root/config.json'
@@ -65,3 +65,32 @@ export const USAGE = [
   '  -c, --config <路径>  指定配置文件（默认 @root/config.json，支持 @root/ 别名）',
   '  -h, --help           显示帮助并退出',
 ].join('\n')
+
+/**
+ * 运行中命令清单（解析、帮助文本共用同一份，避免两处不同步）：
+ * 短名用于快速输入，全名兼容可读写法；`restart` 无短名（防误触）。
+ */
+export const COMMANDS: CliCommandDef[] = [
+  { short: 'r', name: 'reload', desc: '重新读取配置文件并热更新' },
+  { short: 'u', name: 'urls', desc: '显示各服务地址' },
+  { short: 'c', name: 'clear', desc: '清空终端' },
+  { short: 'q', name: 'quit', desc: '退出服务（优雅关闭）' },
+  { short: null, name: 'restart', desc: '进程内重启（重新装配全部组件，仅全名）' },
+  { short: 'h', name: 'help', desc: '显示本帮助与启动帮助' },
+]
+
+/** 解析一行输入：短名与全名都认（大小写不敏感）；空行/未知返回 undefined */
+export function resolveCommand(input: string): CliCommandDef | undefined {
+  const key = input.trim().toLowerCase()
+  if (key === '') return undefined
+  return COMMANDS.find((item) => item.name === key || item.short === key)
+}
+
+/** 运行中帮助：命令清单 + 启动帮助 */
+export function helpText(): string {
+  const rows = COMMANDS.map(
+    (item) =>
+      `  ${(item.short === null ? '  ' : `${item.short} | `).padEnd(10)}${item.name.padEnd(10)}${item.desc}`,
+  )
+  return ['运行中命令（输入后回车）：', ...rows, '', USAGE].join('\n')
+}
