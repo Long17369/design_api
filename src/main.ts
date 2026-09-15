@@ -46,7 +46,7 @@ logger.info(`启动服务（配置：${options.configPath}）`)
 server
   .start()
   .then(() => {
-    cli.attach()
+    void cli.attach()
   })
   .catch((err: unknown) => {
     const message = err instanceof Error ? err.message : String(err)

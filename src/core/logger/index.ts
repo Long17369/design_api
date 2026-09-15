@@ -3,7 +3,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as zlib from 'zlib'
 import { pipeline } from 'stream/promises'
-import { LoggerOptions } from '.'
+import { ConsoleSink, LoggerOptions } from '.'
 
 enum LogLevel {
   TRACE = 0,
@@ -12,6 +12,12 @@ enum LogLevel {
   WARN = 3,
   ERROR = 4,
   FATAL = 5,
+}
+
+/** 参数折叠成一行（自定义控制台接收器只收文本） */
+function formatArgs(args: any[]): string {
+  if (args.length === 0) return ''
+  return ' ' + args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ')
 }
 
 class Logger {
@@ -25,6 +31,9 @@ class Logger {
   private isRotating = false
   private rotationBuffer: string[] = []
   private activeCompressions = 0
+
+  /** 控制台输出接收器（null = 默认 console.log / console.error） */
+  private consoleSink: ConsoleSink | null = null
 
   constructor(options?: LoggerOptions) {
     if (options?.logDir) this.logDir = options.logDir
@@ -78,6 +87,14 @@ class Logger {
     return this.level
   }
 
+  /**
+   * 替换控制台输出通道（交互式终端接管时把日志写进日志区），传 null 恢复默认。
+   * 仅影响控制台输出，文件始终全量写入。
+   */
+  public setConsoleSink(sink: ConsoleSink | null): void {
+    this.consoleSink = sink
+  }
+
   private getTimestamp(): string {
     return new Date().toISOString()
   }
@@ -110,13 +127,7 @@ class Logger {
     // Console output (with colors) - Only if level meets threshold
     if (level >= this.level) {
       const consoleMessage = `${color}[${timestamp}] [${levelName}] [${name}] ${message}${resetColor}`
-      if (level >= LogLevel.ERROR) {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-        console.error(consoleMessage, ...args)
-      } else {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-        console.log(consoleMessage, ...args)
-      }
+      this.writeToConsole(consoleMessage, args, level >= LogLevel.ERROR)
     }
 
     // File output (without colors) - Always write to file
@@ -126,6 +137,21 @@ class Logger {
         ' ' + args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ')
     }
     await this.writeToFile(fileMessage)
+  }
+
+  /** 控制台输出：默认走 console，被接管时交给自定义接收器（参数折进文本） */
+  private writeToConsole(message: string, args: any[], isError: boolean): void {
+    if (this.consoleSink) {
+      this.consoleSink(message + formatArgs(args), isError)
+      return
+    }
+    if (isError) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+      console.error(message, ...args)
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+      console.log(message, ...args)
+    }
   }
 
   private async writeToFile(message: string): Promise<void> {
@@ -329,4 +355,6 @@ const rootLogger = new Logger()
 export const log = {
   getLogger: (name: string) => new NamedLogger(name, rootLogger),
   stop: () => rootLogger.waitForTasks(),
+  /** 替换控制台输出通道（交互式终端接管；传 null 恢复默认） */
+  setConsoleSink: (sink: ConsoleSink | null) => rootLogger.setConsoleSink(sink),
 }
