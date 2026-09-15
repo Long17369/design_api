@@ -27,9 +27,28 @@ import { TABLE_SEEDS, TableSeed } from './seeds'
 
 const logger = log.getLogger('Database')
 
+/** 连接池并发上限的缺省值（配置项 `database.connection_limit` 可覆盖） */
+const DEFAULT_CONNECTION_LIMIT = 10
+
+/** 空闲连接回收时长(ms)：空闲过久且池不紧张时释放 */
+const IDLE_TIMEOUT_MS = 60_000
+
+/** TCP 保活首次探测延迟(ms)：用于尽早发现断链 */
+const KEEP_ALIVE_INITIAL_DELAY_MS = 10_000
+
+/**
+ * 池 `connection` 事件里收到的连接（回调式）。
+ * mysql2 的 promise 池只转发底层事件（`inheritEvents`），实际拿到的是回调式连接，
+ * 与类型声明（promise 版）不符，故按运行时真实形态声明。
+ */
+interface RawPoolConnection {
+  query: (sql: string, values: unknown[], callback: (err: Error | null) => void) => void
+}
+
 export class Database implements Closable {
   private config: DatabaseConfig | null = null
-  private connection: mysql.Connection | null = null
+  /** 连接池（单连接改为池：池满时新请求排队等待，不丢请求） */
+  private pool: mysql.Pool | null = null
   private isInitialized: boolean = false
   private tables: Map<string, TableInfoBuilded>
 
@@ -110,8 +129,9 @@ export class Database implements Closable {
     try {
       // 1. 检查/创建数据库
       await this.testDatabase()
-      // 2. 建立正式连接
-      this.connection = await this.connect()
+      // 2. 建立连接池（并探活一次：池是惰性的，不探活则配置错也会“看似成功”）
+      this.pool = this.createPool()
+      await this.probe()
       // 3. 构建表元信息，并自动建表 / 增量补列
       this.tables = buildTableInfoMap(tables)
       await this.initTables()
@@ -128,39 +148,71 @@ export class Database implements Closable {
   }
 
   /**
-   * 根据配置文件创建数据库连接
-   * @param is_init 是否为初始化连接（不指定数据库）
+   * 初始化专用连接：不指定数据库（仅用于检查/创建数据库，用完即关）
    * @returns 数据库连接
    */
-  private async connect(is_init?: boolean) {
+  private async connectWithoutDatabase(): Promise<mysql.Connection> {
     if (!this.config) {
       logger.error('数据库配置未设置')
-      return Promise.reject(new Error('数据库配置未设置'))
+      throw new Error('数据库配置未设置')
+    }
+    const { host, port, username, password } = this.config
+    return mysql.createConnection({ host, port, user: username, password })
+  }
+
+  /**
+   * 创建连接池。
+   *
+   * 关键行为：
+   * - `waitForConnections: true` + `queueLimit: 0`：池满时**排队等待**（不报错、不丢请求）
+   * —— 待有连接释放或新建后自动继续；
+   * - `connectionLimit`：并发上限（配置项 `database.connection_limit`，缺省 10）；
+   * - `enableKeepAlive` + `maxIdle` / `idleTimeout`：尽早发现断链、回收空闲连接；
+   * - 每条**新建**连接都做一次会话初始化（时区），保证换连接（含断后重建）后行为一致。
+   */
+  private createPool(): mysql.Pool {
+    if (!this.config) {
+      logger.error('数据库配置未设置')
+      throw new Error('数据库配置未设置')
     }
     const { host, port, username, password, database_name, timezone } = this.config
-    if (is_init) {
-      // 返回一个临时的数据库连接，用于初始化数据库
-      return mysql.createConnection({
-        host,
-        port,
-        user: username,
-        password,
-      })
-    }
     // MySQL 不接受 'Z'，统一映射为 '+00:00'
     const mysqlTimezone = timezone === 'Z' ? '+00:00' : timezone
-    const connect = await mysql.createConnection({
+    const connectionLimit = this.config.connection_limit ?? DEFAULT_CONNECTION_LIMIT
+
+    const pool = mysql.createPool({
       host,
       port,
       user: username,
       password,
       database: database_name,
       timezone: mysqlTimezone,
+      waitForConnections: true,
+      connectionLimit,
+      queueLimit: 0,
+      maxIdle: connectionLimit,
+      idleTimeout: IDLE_TIMEOUT_MS,
+      enableKeepAlive: true,
+      keepAliveInitialDelay: KEEP_ALIVE_INITIAL_DELAY_MS,
     })
-    await connect.query('SET time_zone = ?', [mysqlTimezone]).catch((err) => {
-      logger.error(`设置数据库时区失败: ${err.message}`)
+
+    pool.on('connection', (connection) => {
+      // 注意：promise 池只是把底层事件原样转发（`inheritEvents`），这里收到的是**回调式**连接，
+      // 故用回调写法；类型声明与运行时不一致，用局部结构类型标注并断言。
+      const raw = connection as unknown as RawPoolConnection
+      raw.query('SET time_zone = ?', [mysqlTimezone], (err) => {
+        if (err) logger.error(`设置数据库时区失败: ${err.message}`)
+      })
     })
-    return connect
+
+    return pool
+  }
+
+  /** 探活：向池取一次连接执行 `SELECT 1`（池是惰性的，建池本身不建立连接） */
+  private async probe(): Promise<void> {
+    const pool = this.pool
+    if (!pool) throw new Error('数据库连接池未创建')
+    await pool.query('SELECT 1')
   }
 
   /**
@@ -175,7 +227,7 @@ export class Database implements Closable {
     const { database_name } = this.config
     let connect: mysql.Connection | undefined
     try {
-      connect = await this.connect(true)
+      connect = await this.connectWithoutDatabase()
       const [result] = (await connect.query(
         'SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?',
         [database_name],
@@ -204,26 +256,26 @@ export class Database implements Closable {
    * @returns
    */
   private async initTables() {
-    if (!this.connection) {
-      logger.error('数据库连接未初始化')
-      throw new Error('数据库连接未初始化')
+    const pool = this.pool
+    if (!pool) {
+      logger.error('数据库连接池未初始化')
+      throw new Error('数据库连接池未初始化')
     }
-    const connection = this.connection
     for (const table of sortTablesForCreate(tables)) {
-      const existsRows = (await connection.query(
+      const existsRows = (await pool.query(
         `SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
         [table.name],
       )) as [Array<{ count: number }>, unknown]
       const exists = Number(existsRows[0]?.[0]?.count ?? 0) > 0
 
       if (!exists) {
-        await connection.query(buildCreateTableSQL(table))
+        await pool.query(buildCreateTableSQL(table))
         logger.info(`表 ${table.name} 创建成功`)
         continue
       }
 
       // 已存在：增量补齐缺失列
-      const columnRows = (await connection.query('SHOW COLUMNS FROM ??', [table.name])) as [
+      const columnRows = (await pool.query('SHOW COLUMNS FROM ??', [table.name])) as [
         Array<{ Field: string }>,
         unknown,
       ]
@@ -231,7 +283,7 @@ export class Database implements Closable {
       const columns = [...table.base_columns, ...(table.additional_columns || [])]
       for (const column of columns) {
         if (!existingColumns.has(column.name)) {
-          await connection.query(buildAlterAddColumnSQL(table, column))
+          await pool.query(buildAlterAddColumnSQL(table, column))
           logger.info(`表 ${table.name} 添加列 ${column.name} 成功`)
         }
       }
@@ -249,10 +301,10 @@ export class Database implements Closable {
   }
 
   /**
-   * 等待数据库就绪并返回连接
-   * @returns 数据库连接
+   * 等待数据库就绪并返回**连接池**（池满时 `pool.query` 会自行排队等待）
+   * @returns 连接池
    */
-  private async ensureReady(): Promise<mysql.Connection> {
+  private async ensureReady(): Promise<mysql.Pool> {
     if (!this.config) {
       logger.error('数据库配置未设置')
       throw new Error('数据库配置未设置')
@@ -260,11 +312,11 @@ export class Database implements Closable {
     while (!this.isInitialized) {
       await new Promise((resolve) => setTimeout(resolve, 100))
     }
-    if (!this.connection) {
-      logger.error('数据库连接未初始化')
-      throw new Error('数据库连接未初始化')
+    if (!this.pool) {
+      logger.error('数据库连接池未初始化')
+      throw new Error('数据库连接池未初始化')
     }
-    return this.connection
+    return this.pool
   }
 
   /**
@@ -278,13 +330,13 @@ export class Database implements Closable {
     if (!this.initInProgress) {
       while (this.reconnecting !== null) await this.reconnecting
     }
-    const connection = await this.ensureReady()
+    const pool = await this.ensureReady()
     this.inFlight++
     try {
       if (params === undefined) {
-        return (await connection.query(sql)) as [unknown, unknown]
+        return (await pool.query(sql)) as [unknown, unknown]
       }
-      return (await connection.query(sql, params)) as [unknown, unknown]
+      return (await pool.query(sql, params)) as [unknown, unknown]
     } finally {
       this.inFlight--
       if (this.inFlight === 0) this.idleWaiters.splice(0).forEach((resolve) => resolve())
@@ -460,25 +512,26 @@ export class Database implements Closable {
    * 同步各表初始化项
    */
   private async syncInitialRows(): Promise<void> {
-    if (!this.connection) {
-      logger.error('数据库连接未初始化')
-      throw new Error('数据库连接未初始化')
+    const pool = this.pool
+    if (!pool) {
+      logger.error('数据库连接池未初始化')
+      throw new Error('数据库连接池未初始化')
     }
     for (const seed of TABLE_SEEDS) {
-      await this.syncOneSeed(this.connection, seed)
+      await this.syncOneSeed(pool, seed)
     }
   }
 
   /**
    * 同步单张表的初始化项
-   * @param connection 数据库连接
+   * @param pool 连接池（逐条语句自动取用/归还连接）
    * @param seed 初始化项定义
    */
-  private async syncOneSeed(connection: mysql.Connection, seed: TableSeed): Promise<void> {
+  private async syncOneSeed(pool: mysql.Pool, seed: TableSeed): Promise<void> {
     const info = findTableInfo(this.tables, seed.table)
 
     // 仅同步已存在的表
-    const existsRows = (await connection.query(
+    const existsRows = (await pool.query(
       `SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
       [info.name],
     )) as [Array<{ count: number }>, unknown]
@@ -515,7 +568,7 @@ export class Database implements Closable {
     }
     const keyColumn = quote(seed.keyColumn)
     const placeholders = keyValues.map(() => '?').join(', ')
-    const [existingRows] = (await connection.query(
+    const [existingRows] = (await pool.query(
       `SELECT ${keyColumn} AS \`key\` FROM ${info.name} WHERE ${keyColumn} IN (${placeholders})`,
       keyValues,
     )) as [Array<{ key: string | number }>, unknown]
@@ -530,7 +583,7 @@ export class Database implements Closable {
       const key = row[keyIndex]
       if (key === undefined || key === null || existing.has(String(key))) continue
 
-      await connection.query(
+      await pool.query(
         insertSQL,
         seed.columns.map((_, index) => row[index] ?? null),
       )
@@ -540,7 +593,7 @@ export class Database implements Closable {
   }
 
   /**
-   * 关闭数据库连接
+   * 关闭数据库连接池
    * @returns
    */
   public async close() {
@@ -587,9 +640,10 @@ export class Database implements Closable {
   /** 关闭当前连接（不注销订阅；热重连复用）。关之前先将就绪位放下，让新请求等重连。 */
   private async closeConnection(): Promise<void> {
     this.isInitialized = false
-    if (!this.connection) return
-    await this.connection.end()
-    this.connection = null
-    logger.info('数据库连接已关闭')
+    const pool = this.pool
+    if (!pool) return
+    this.pool = null
+    await pool.end()
+    logger.info('数据库连接池已关闭')
   }
 }
