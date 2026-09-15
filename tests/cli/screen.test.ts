@@ -85,7 +85,7 @@ describe('Screen 布局（滚动区 + 底部固定两行）', () => {
     expect(input.raw).toBe(true)
   })
 
-  it('print：日志写进滚动区底行并重绘底部，不触碰输入行内容', () => {
+  it('print：恢复到日志锚点直接写（折行/滚动交给终端），再重绘底部', () => {
     const { screen, output, input } = makeScreen()
     screen.attach()
     press(input, 'a')
@@ -94,11 +94,48 @@ describe('Screen 布局（滚动区 + 底部固定两行）', () => {
     screen.print('日志一行')
 
     const text = output.text()
-    expect(text).toContain(`${ESC}22;1H`) // 跳到滚动区底行
-    expect(text).toContain('日志一行')
+    expect(text).toContain('\u001b8') // 恢复日志锚点（终端保存的光标）
+    expect(text).toContain('日志一行\n')
+    expect(text).toContain('\u001b7') // 写完重新保存锚点
+    expect(text).not.toContain(`${ESC}22;1H`) // 不再手工计算日志行号
     expect(text).toContain(`${ESC}23;1H`) // 重绘状态行
     expect(text).toContain(`${ESC}24;1H`) // 重绘输入行
     expect(text).toContain('> a') // 已输入内容保留
+  })
+
+  it('长行折行不靠手工定位：整段文本原样交给终端（不会被后续写入顶掉）', () => {
+    const { screen, output } = makeScreen()
+    screen.attach()
+    output.reset()
+
+    screen.print('很长的一行'.repeat(20))
+
+    const text = output.text()
+    expect(text).toContain('很长的一行'.repeat(20))
+    expect(text).not.toContain(`${ESC}22;1H`)
+    expect(text).not.toContain(`${ESC}21;1H`)
+  })
+
+  it('多行文本一次写出（不逐行定位）', () => {
+    const { screen, output } = makeScreen()
+    screen.attach()
+    output.reset()
+
+    screen.print('A\nB\nC')
+
+    const text = output.text()
+    expect(text).toContain('A\nB\nC\n')
+    expect(text).not.toContain(`${ESC}1;1H${ESC}2KA`) // 不再逐行跳转
+  })
+
+  it('print 规整末尾换行（不会多出空行）', () => {
+    const { screen, output } = makeScreen()
+    screen.attach()
+    output.reset()
+
+    screen.print('结尾带换行\n')
+
+    expect(output.text()).toContain('结尾带换行\n\u001b7')
   })
 
   it('非 TTY / 尺寸过小：不接管，print 退化为普通输出', () => {
@@ -146,61 +183,32 @@ describe('Screen 布局（滚动区 + 底部固定两行）', () => {
     expect(text).toContain(`${ESC}30;1H`)
   })
 
-  it('日志按落点逐行向下写，写满后才上滚', () => {
-    const { screen, output } = makeScreen()
-    screen.attach()
-
-    // attach 后落点接在既有输出之后（滚动区底行 22）
-    output.reset()
-    screen.print('第 1 条')
-    expect(output.text()).toContain(`${ESC}22;1H${ESC}2K第 1 条`)
-
-    // 落点已越过底行 → 先在底行换行（上滚一行）再写
-    output.reset()
-    screen.print('第 2 条')
-    const text = output.text()
-    expect(text).toContain(`${ESC}22;1H\n`) // 上滚
-    expect(text).toContain(`${ESC}22;1H${ESC}2K第 2 条`)
-  })
-
-  it('clear：与 clear 命令同序列（归位 + 清屏 + 清回滚）', () => {
+  it('clear：与 clear 命令同序列（归位 + 清屏 + 清回滚）并把锚点复位', () => {
     const { screen, output } = makeScreen()
     screen.attach()
     output.reset()
 
     screen.clear()
 
-    expect(output.text()).toContain('\u001b[H\u001b[2J\u001b[3J')
-    expect(output.text()).toContain(`${ESC}1;22r`) // 重新设定滚动区
+    const text = output.text()
+    expect(text).toContain('\u001b[H\u001b[2J\u001b[3J')
+    expect(text).toContain(`${ESC}1;22r`) // 重新设定滚动区
+    expect(text).toContain('\u001b7') // 光标归位后重新记为日志锚点（从首行开始写）
   })
 
-  it('clear 后日志从滚动区首行往下写（不再从底行撑出空行）', () => {
+  it('clear 后写日志仍走锚点（由终端记住首行，不手工算行号）', () => {
     const { screen, output } = makeScreen()
     screen.attach()
-    screen.print('清屏前的日志') // 落点已在底行
+    screen.print('清屏前的日志')
     screen.clear()
     output.reset()
 
     screen.print('清屏后第 1 条')
-    expect(output.text()).toContain(`${ESC}1;1H${ESC}2K清屏后第 1 条`)
-
-    output.reset()
-    screen.print('清屏后第 2 条')
-    expect(output.text()).toContain(`${ESC}2;1H${ESC}2K清屏后第 2 条`)
-  })
-
-  it('多行文本逐行推进落点', () => {
-    const { screen, output } = makeScreen()
-    screen.attach()
-    screen.clear()
-    output.reset()
-
-    screen.print('A\nB\nC')
 
     const text = output.text()
-    expect(text).toContain(`${ESC}1;1H${ESC}2KA`)
-    expect(text).toContain(`${ESC}2;1H${ESC}2KB`)
-    expect(text).toContain(`${ESC}3;1H${ESC}2KC`)
+    expect(text).toContain('\u001b8') // 仍走终端保存的锚点输出
+    expect(text).toContain('清屏后第 1 条')
+    expect(text).not.toContain(`${ESC}1;1H`) // 不手工跳到首行
   })
 })
 

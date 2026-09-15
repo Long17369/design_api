@@ -19,6 +19,10 @@ const DIM = `${ESC}2m`
 /** 与 `clear` 命令一致：光标归位 + 清屏 + 清回滚缓冲 */
 const CLEAR_ALL = '\u001b[H\u001b[2J\u001b[3J'
 
+/** 保存 / 恢复光标（DECSC / DECRC）：日志锚点交给终端记，不自己算行号 */
+const SAVE_CURSOR = '\u001b7'
+const RESTORE_CURSOR = '\u001b8'
+
 /**
  * 终端布局：**底部固定状态行 + 输入行，其余行作为日志滚动区**。
  *
@@ -43,8 +47,6 @@ export class Screen {
   /** 终端尺寸（每行/列号都是 1 起） */
   private rows = 24
   private cols = 80
-  /** 下一条日志的落点行（绝对行号，1 起）；> 滚动区底行表示需先上滚 */
-  private logRow = 1
   private active = false
   private onKeypress: ((str: string | undefined, key: readline.Key) => void) | null = null
   private onResize: (() => void) | null = null
@@ -69,8 +71,6 @@ export class Screen {
 
     this.active = true
     this.applyScrollRegion()
-    // 继续接在既有输出之后（从滚动区底行起写，写满再上滚）
-    this.logRow = this.regionBottom()
     this.input.setRawMode(true)
     this.input.resume()
     readline.emitKeypressEvents(this.input)
@@ -78,6 +78,8 @@ export class Screen {
     this.input.on('keypress', this.onKeypress)
     this.onResize = () => this.handleResize()
     this.output.on('resize', this.onResize)
+    // 把当前输出位置记为**日志锚点**（接在既有输出之后），之后每次写日志都回到这里
+    this.output.write(SAVE_CURSOR)
     this.redraw()
     return true
   }
@@ -97,27 +99,19 @@ export class Screen {
   }
 
   /**
-   * 写入日志/命令输出：从滚动区**当前落点**向下写，写满后在滚动区内上滚；底部固定区不受影响。
-   * 落点由 `logRow` 跟踪 —— `clear` 后回到滚动区首行，避免从底行往上“撑”出一片空行。
+   * 写入日志/命令输出。
+   *
+   * **不自己算行号**：先恢复到“日志锚点”（终端保存的光标位置）直接写，写完重新保存。
+   * 折行与滚动全交给终端 —— 长行折出的第二行不会覆盖前一行，也不会溢出到底部固定区。
    */
   public print(text: string): void {
     if (!this.active) {
       this.output.write(`${text}\n`)
       return
     }
-    for (const line of text.split('\n')) this.appendLine(line)
+    const line = text.endsWith('\n') ? text.slice(0, -1) : text
+    this.output.write(`${RESTORE_CURSOR}${RESET_ATTR}${ESC}K${line}\n${SAVE_CURSOR}`)
     this.redraw()
-  }
-
-  /** 追加一行到日志区：落点到底行之后，先在底行换行（整区上滚一行）再写 */
-  private appendLine(line: string): void {
-    const bottom = this.regionBottom()
-    if (this.logRow > bottom) {
-      this.output.write(`${ESC}${bottom};1H\n`)
-      this.logRow = bottom
-    }
-    this.output.write(`${RESET_ATTR}${ESC}${this.logRow};1H${ESC}2K${line}`)
-    this.logRow++
   }
 
   /** 更新状态行内容（立即重绘） */
@@ -126,8 +120,8 @@ export class Screen {
   }
 
   /**
-   * 清屏：与 `clear` 命令一致 —— **光标归位 + 清屏 + 清回滚缓冲**，
-   * 随后日志从滚动区**首行**向下写（否则会从底行往上撑出一片空行）。
+   * 清屏：与 `clear` 命令一致 —— **光标归位 + 清屏 + 清回滚缓冲**。
+   * 光标归位后即日志区首行，重新记为日志锚点 ⇒ 之后的日志从顶部开始写。
    */
   public clear(): void {
     if (!this.active) {
@@ -136,7 +130,7 @@ export class Screen {
     }
     this.output.write(`${RESET_ATTR}${CLEAR_ALL}`)
     this.applyScrollRegion()
-    this.logRow = 1
+    this.output.write(SAVE_CURSOR)
     this.redraw()
   }
 
@@ -193,7 +187,6 @@ export class Screen {
   private handleResize(): void {
     this.measure()
     this.applyScrollRegion()
-    this.logRow = Math.min(this.logRow, this.regionBottom())
     this.redraw()
   }
 
