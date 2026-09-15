@@ -33,4 +33,14 @@ declare module '@/cli' {
     /** 各服务地址 */
     endpoints(): import('@/server').ServiceEndpoint[]
   }
+
+  /** 底部固定布局（`Screen`）的回调与内容来源 */
+  interface ScreenOptions {
+    /** 状态行文本（每次重绘时取一次） */
+    status: () => string
+    /** 提交一行输入（空行由 Screen 自行忽略） */
+    onSubmit: (line: string) => void
+    /** Ctrl+C（交回入口的优雅关闭） */
+    onInterrupt: () => void
+  }
 }
