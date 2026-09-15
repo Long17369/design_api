@@ -198,6 +198,27 @@
   - 值形态：单值字符串、集合/区间字符串数组、空值不带值；值一律 `?` 占位符，非法形状（未知操作符 / 空集合 / `between` 非 2 元素 / 值类型不符）→ 400
   - 用例：`tests/core/where.test.ts`
 
+## 服务编排与生命周期（`src/server.ts`）
+
+- [x] **服务编排抽离成 `Server` 类**（2026-09-15）：`main.ts` 只保留 CLI 入口职责（`SIGTERM`/`SIGINT` 信号、3s 兜底强退、启动失败退出码 1）
+  - `new Server(configPath)` → `start()` 按依赖顺序装配 `Config` → `Database` → 网关（MQTT/HTTP/WS）→ 模块；配置路径由调用方给出（当前 `main.ts` 写死 `@root/config.json`）
+  - `stop(reason)` 广播 bus `shutdown`，各组件（构造时订阅）自行 `close()` 释放资源
+- [x] **进程内重启 `restart()`**（2026-09-15）：关停全部组件并等其释放完成 → 重新装配 → 启动
+  - 直接逐个 `await close()` 拿到**确定的完成信号**（各组件 `close()` 幂等；本方法不广播 `shutdown`，故不与订阅关闭重复释放）
+  - 关闭顺序与启动相反、数据库最后关（避免模块往已关闭的连接写）；单个组件关闭失败只记日志、不中断重启
+- [x] **配置 section 注册机制**（2026-09-15，`@core/config`）：**config 模块只提供机制、不自带清单**
+  - 类型侧：谁消费谁声明 —— 消费方在自己的 `*.d.ts` 里给 `Config` 补类型（`database` → `@core/database/database.d.ts`、`mqtt` → `@gateways/mqtt/types.d.ts`、`port` → `@gateways/http/http.d.ts`）；`ConfigSectionName` 直接取 `keyof Config`（类不声明公开字段 ⇒ 公开键恰好等于各 section），**新增 section 无需改动 config 模块**
+  - 运行期：消费方在构造时 `registerConfigSection({ name, owner })` 自行登记（`Database` / `MqttGateway` / `HttpServer` 各登记自己那一段）；`getConfigSections()` 查询
+  - 同名覆盖 ⇒ 进程内重启重建组件、重新登记，不会重复累积
+  - 对比：`tables/`、`autoControl/components/` 是「集中注册表 + 单项文件」，此处因 section 归属不同层的组件（core / gateways）而改为**消费方自注册**
+- [ ] **配置热更新 `reloadConfig()`：只做到 diff，应用逻辑待补**（2026-09-15）
+  - [x] 已完成：重新读取配置文件 → 按**已注册**的 section 深比较（`@core/config/utils::diffConfigSections`）→ 返回 `{ changed: [{ section, owner }], applied: false }`
+  - [ ] **通知机制**：Server 只广播变更（如 bus 新增 `CONFIG_CHANGED`），**归属组件订阅后自行应用**（Server 不越权代改）
+  - [ ] **各 section 的应用方式**：`mqtt` → `MqttGateway.setConfig()`（重连 broker 并重订阅主题）；`database` → `Database.setConfig()`（重连，需先确认无在途写入）；**`port` 不可热更**（HTTP 监听需重建 socket），只能按「需完整 `restart()`」处理
+  - [ ] **`this.config` 更新时机**：待各 section 确认应用成功后再更新，否则下次 diff 会漏报（当前一律不更新，保持「当前配置 = 实际生效配置」）
+  - [ ] **进程级单例**（`@core/cache` / `@core/locks`）在进程内重启时不重置 —— 与真实进程重启行为不同，需评估是否由归属模块在 `restart()` 时显式清理
+- [ ] **重启 / 热更新的调用入口**：暂**不暴露 HTTP**，仅供 CLI 使用；CLI 子命令（如 `restart` / `reload`）**暂不实现具体调用**
+
 ## 工程 / 工具 / 依赖
 
 - [x] 运行与校验：`tsx` 运行（勿用 ts-node）、`pnpm type-check` / `lint` / `format`

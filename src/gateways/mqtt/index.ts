@@ -1,4 +1,5 @@
 import mqtt from 'mqtt'
+import { registerConfigSection } from '@core/config'
 import { log } from '@core/logger'
 import { bus } from '@core/bus'
 import { Closable } from '@core/lifecycle'
@@ -21,6 +22,8 @@ export class MqttGateway implements Closable {
     topics.forEach((topicHandler) => {
       this.topicHandlers.set(topicHandler.topic, topicHandler)
     })
+    // 声明本组件消费的配置 section（谁消费谁注册；热更新 = setConfig 重连并重订阅）
+    registerConfigSection({ name: 'mqtt', owner: 'MqttGateway' })
     logger.info(`MQTT 网关已注册，入站主题: ${[...this.topicHandlers.keys()].join(', ') || '(无)'}`)
     this.unsubscribers.push(
       bus.onEvent('shutdown', () => {
