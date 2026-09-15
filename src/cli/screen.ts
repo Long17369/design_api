@@ -23,6 +23,9 @@ const CLEAR_ALL = '\u001b[H\u001b[2J\u001b[3J'
 const SAVE_CURSOR = '\u001b7'
 const RESTORE_CURSOR = '\u001b8'
 
+/** 终端的光标位置回复（DSR）：`ESC[<row>;<col>R`。由 ESC 常量拼出，避免正则里出现控制字符 */
+const DSR_REPLY = new RegExp(`${ESC.replace('[', '\\[')}([0-9]+);([0-9]+)R`)
+
 /**
  * 终端布局：**底部固定状态行 + 输入行，其余行作为日志滚动区**。
  *
@@ -55,6 +58,8 @@ export class Screen {
     private readonly options: ScreenOptions,
     private readonly output: typeof process.stdout = process.stdout,
     private readonly input: typeof process.stdin = process.stdin,
+    /** 查询光标位置（DSR）的等待时长(ms)；超时则退化为“直接记录当前位置” */
+    private readonly dsrTimeoutMs = 150,
   ) {}
 
   /** 是否已进入布局 */
@@ -62,29 +67,73 @@ export class Screen {
     return this.active
   }
 
-  /** 进入底部固定布局（仅 TTY）；返回是否进入 */
-  public attach(): boolean {
+  /**
+   * 进入底部固定布局（仅 TTY）；返回是否进入。
+   *
+   * 顺序很关键：**先记录日志锚点，再设定滚动区** —— DECSTBM（`ESC[<t>;<b>r`）
+   * 会把光标带回左上角，若先设滚动区再记录，锚点会落到首行、新日志会覆盖启动输出。
+   */
+  public async attach(): Promise<boolean> {
     if (this.active) return true
     if (!this.input.isTTY || !this.output.isTTY) return false
     this.measure()
     if (this.rows < MIN_ROWS || this.cols < MIN_COLS) return false
 
-    this.active = true
-    this.applyScrollRegion()
     this.input.setRawMode(true)
     this.input.resume()
+
+    // 接管按键解码**之前**问一次光标行：既拿到真实输出位置，也避免把回复当按键
+    const cursorRow = await this.queryCursorRow()
+    this.active = true
+
+    // 屏幕已满（光标在底部固定区）⇒ 先归一化到滚动区底行（上滚一行，丢弃最旧一行）
+    if (cursorRow !== null && cursorRow > this.regionBottom()) {
+      this.output.write(`${ESC}${this.regionBottom()};1H\n`)
+    }
+    // 记录日志锚点：之后写日志都回到这里，折行/滚动交给终端
+    this.output.write(SAVE_CURSOR)
+    this.applyScrollRegion()
+
     readline.emitKeypressEvents(this.input)
     this.onKeypress = (str, key) => this.handleKey(str, key)
     this.input.on('keypress', this.onKeypress)
     this.onResize = () => this.handleResize()
     this.output.on('resize', this.onResize)
-    // 把当前输出位置记为**日志锚点**（接在既有输出之后），之后每次写日志都回到这里
-    this.output.write(SAVE_CURSOR)
     this.redraw()
     return true
   }
 
-  /** 退出布局并还原终端（滚动区复位、底部两行清空、原始模式关闭） */
+  /**
+   * 问终端当前光标行（DSR：发 `ESC[6n`，终端回 `ESC[<row>;<col>R`）。
+   * 拿不到回复返回 null（部分终端/伪终端不回）—— 调用方按“直接记录当前位置”处理。
+   */
+  private queryCursorRow(): Promise<number | null> {
+    return new Promise((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      let settled = false
+      const finish = (row: number | null): void => {
+        if (settled) return
+        settled = true
+        if (timer !== undefined) clearTimeout(timer)
+        this.input.off('data', onData)
+        resolve(row)
+      }
+      const onData = (chunk: Buffer | string): void => {
+        const match = DSR_REPLY.exec(String(chunk))
+        if (match?.[1] !== undefined) finish(Number(match[1]))
+      }
+      this.input.on('data', onData)
+      timer = setTimeout(() => finish(null), this.dsrTimeoutMs)
+      this.output.write(`${ESC}6n`)
+    })
+  }
+
+  /**
+   * 退出布局并还原终端。
+   *
+   * ⚠️ 复位滚动区（`ESC[r`）会把光标带回**左上角**，所以复位后必须显式把光标
+   * 放回底行，否则退出后的 shell 提示符会从屏幕顶部往下写、与残留日志交叠。
+   */
   public detach(): void {
     if (!this.active) return
     this.active = false
@@ -94,7 +143,10 @@ export class Screen {
     this.onResize = null
     this.input.setRawMode(false)
     this.output.write(
-      `${RESET_ATTR}${ESC}${this.rows - 1};1H${ESC}2K${ESC}${this.rows};1H${ESC}2K${ESC}r`,
+      `${RESET_ATTR}${ESC}r` +
+        `${ESC}${this.rows - 1};1H${ESC}2K` + // 清掉原状态行
+        `${ESC}${this.rows};1H${ESC}2K` + // 清掉原输入行
+        `${ESC}${this.rows};1H`, // 光标停到底行，shell 提示符从此处继续
     )
   }
 
@@ -195,6 +247,9 @@ export class Screen {
   private handleKey(str: string | undefined, key: readline.Key | undefined): void {
     if (!key) return
     const name = key.name ?? ''
+
+    // 光标位置查询等控制序列回复迟到时不要当按键输入（正常已在 attach 时消费掉）
+    if (str !== undefined && /^\[\d+(;\d+)*[A-Z]$/.test(str)) return
 
     if (key.ctrl && name === 'c') {
       this.options.onInterrupt()

@@ -40,7 +40,7 @@ export class Cli {
    * 接管终端：进入底部固定布局，并把日志控制台输出接入日志区。
    * @returns 是否已接管（非 TTY 或终端过小时为 false）
    */
-  public attach(): boolean {
+  public async attach(): Promise<boolean> {
     if (this.screen?.isActive) return true
 
     const screen = new Screen({
@@ -48,7 +48,7 @@ export class Cli {
       onSubmit: (line) => this.submit(line),
       onInterrupt: () => this.host.stop('SIGINT'),
     })
-    if (!screen.attach()) {
+    if (!(await screen.attach())) {
       logger.info('未检测到可用的交互式终端，跳过命令循环（可用 SIGINT / SIGTERM 退出）')
       return false
     }
