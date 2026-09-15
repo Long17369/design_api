@@ -64,6 +64,11 @@
           "type": "string",
           "default": "Z",
           "description": "时区"
+        },
+        "connection_limit": {
+          "type": "integer",
+          "default": 10,
+          "description": "连接池并发上限，池满时新请求排队等待而不丢弃"
         }
       }
     }

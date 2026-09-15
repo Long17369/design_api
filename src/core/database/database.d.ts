@@ -10,6 +10,11 @@ declare module '@core/database' {
     password: string
     database_name: string
     timezone: string
+    /**
+     * 连接池并发上限（缺省 `DEFAULT_CONNECTION_LIMIT`）。
+     * 池满时新请求**排队等待**（不报错、不丢请求），待有连接释放或新建后自动执行。
+     */
+    connection_limit?: number
   }
   Database
   interface TableInfoBuilded extends TableInfo {
