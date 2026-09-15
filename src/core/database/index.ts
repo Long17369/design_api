@@ -33,6 +33,18 @@ export class Database implements Closable {
   private isInitialized: boolean = false
   private tables: Map<string, TableInfoBuilded>
 
+  /** 在途 SQL 计数（热重连闸门：重连前等在途操作结束，避免关连接时丢写） */
+  private inFlight = 0
+
+  /** 等待「在途归零」的唤醒器 */
+  private readonly idleWaiters: Array<() => void> = []
+
+  /** 进行中的热重连；非 null 时新的 SQL 先等它结束 */
+  private reconnecting: Promise<void> | null = null
+
+  /** 初始化进行中：init 内部的 SQL **不走重连闸门**（否则重连会等自己） */
+  private initInProgress = false
+
   /** 事件订阅注销句柄集合（强引用监听；close 时统一注销，解除 bus 对本实例的引用） */
   private readonly unsubscribers: Array<() => void> = []
 
@@ -44,11 +56,16 @@ export class Database implements Closable {
       bus.onEvent('shutdown', () => {
         this.close()
       }),
-      bus.onEvent('CONFIG_CHANGED', ({ changed, report }) => {
+      bus.onEvent('CONFIG_CHANGED', ({ changed, config, report }) => {
         if (!changed.some((item) => item.section === 'database')) return
-        // 热重连需先串行化在途写入（避免连接被替换时丢写），暂交由整体 restart()
-        logger.warn('配置热更新：database 变化需完整 restart()（热重连待补串行化）')
-        report('database', 'restart-required')
+        // 热重连：等在途操作结束再换连接（失败只回报未生效，不影响已生效部分）
+        void this.reconnect(config.database)
+          .then(() => report('database', 'applied'))
+          .catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : String(err)
+            logger.error(`数据库热重连失败：${message}`)
+            report('database', 'failed')
+          })
       }),
     )
   }
@@ -71,7 +88,20 @@ export class Database implements Closable {
     })
   }
 
-  private async init() {
+  /**
+   * 初始化数据库（设置 `initInProgress`：init 内部的 SQL 不走热重连闸门）
+   */
+  private async init(): Promise<void> {
+    this.initInProgress = true
+    try {
+      await this.initInternal()
+    } finally {
+      this.initInProgress = false
+    }
+  }
+
+  /** 初始化实现：建库 → 连接 → 建表/补列 → 种子同步 → 表工具（入口见 `init()`） */
+  private async initInternal() {
     if (!this.config) {
       logger.error('数据库配置未设置')
       return Promise.reject(new Error('数据库配置未设置'))
@@ -244,11 +274,21 @@ export class Database implements Closable {
    * @returns 查询结果
    */
   private async query(sql: string, params?: SqlValue[]): Promise<[unknown, unknown]> {
-    const connection = await this.ensureReady()
-    if (params === undefined) {
-      return (await connection.query(sql)) as [unknown, unknown]
+    // 热重连闸门：重连期间先等它结束（init 内部的 SQL 不走闸门，见 initInProgress）
+    if (!this.initInProgress) {
+      while (this.reconnecting !== null) await this.reconnecting
     }
-    return (await connection.query(sql, params)) as [unknown, unknown]
+    const connection = await this.ensureReady()
+    this.inFlight++
+    try {
+      if (params === undefined) {
+        return (await connection.query(sql)) as [unknown, unknown]
+      }
+      return (await connection.query(sql, params)) as [unknown, unknown]
+    } finally {
+      this.inFlight--
+      if (this.inFlight === 0) this.idleWaiters.splice(0).forEach((resolve) => resolve())
+    }
   }
 
   // ======================= 统一数据库操作接口 =======================
@@ -506,11 +546,50 @@ export class Database implements Closable {
   public async close() {
     // 统一注销所有事件订阅，释放 bus 对本实例的引用
     this.unsubscribers.splice(0).forEach((unsubscribe) => unsubscribe())
-    if (this.connection) {
-      await this.connection.end()
-      this.connection = null
-      this.isInitialized = false
-      logger.info('数据库连接已关闭')
+    await this.closeConnection()
+  }
+
+  /**
+   * 热重连：按新配置重建连接（配置热更新用）。
+   *
+   * 与启动期的 `setConfig()` 的区别：先**等在途 SQL 结束**再关旧连接（不丢写/不打断查询），
+   * 期间新的 SQL 会在闸门处等待；`isInitialized` 在关连接前置 false ⇒ 即使有请求绕开
+   * 闸门，`ensureReady()` 也会自旋等待重连完成，不会拿到半关闭的连接。
+   */
+  public async reconnect(config: DatabaseConfig): Promise<void> {
+    if (this.reconnecting !== null) {
+      logger.warn('数据库正在重连，忽略重复的 reconnect()')
+      await this.reconnecting
+      return
     }
+    logger.info('数据库热重连：等待在途操作结束...')
+    const task = (async () => {
+      await this.idle()
+      await this.closeConnection()
+      this.config = config
+      await this.init()
+    })()
+    this.reconnecting = task
+    try {
+      await task
+      logger.info('数据库热重连完成')
+    } finally {
+      this.reconnecting = null
+    }
+  }
+
+  /** 等在途 SQL 归零 */
+  private idle(): Promise<void> {
+    if (this.inFlight === 0) return Promise.resolve()
+    return new Promise((resolve) => this.idleWaiters.push(resolve))
+  }
+
+  /** 关闭当前连接（不注销订阅；热重连复用）。关之前先将就绪位放下，让新请求等重连。 */
+  private async closeConnection(): Promise<void> {
+    this.isInitialized = false
+    if (!this.connection) return
+    await this.connection.end()
+    this.connection = null
+    logger.info('数据库连接已关闭')
   }
 }

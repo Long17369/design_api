@@ -216,9 +216,9 @@
 - [x] **配置热更新 `reloadConfig()`：广播变更 + 等回报 + 按 section 回写**（2026-09-15）
   - [x] 重新读取配置文件 → 按**已注册**的 section 深比较（`@core/config/utils::diffConfigSections`）
   - [x] **通知机制**：Server 广播 `CONFIG_CHANGED`（载荷 `{ changed, config, report }`），**归属组件订阅后自行应用**（Server 不越权代改）；`applyConfigChanges()` 负责广播 → 等回报 → 超时 `CONFIG_APPLY_TIMEOUT_MS`(3s) 未回报**按未生效处理**
-  - [x] **各 section 的应用方式**：`mqtt` → `MqttGateway.setConfig()` 重连 broker 并重订阅（回报 `applied`）；`port` → `HttpServer` 回报 `restart-required`（监听 socket 需重建）；`database` → 暂回报 `restart-required`
+  - [x] **各 section 的应用方式**：`mqtt` → `MqttGateway.setConfig()` 重连 broker 并重订阅（回报 `applied`）；`database` → `Database.reconnect()` 热重连（回报 `applied`）；`port` → `HttpServer` 回报 `restart-required`（监听 socket 需重建）
   - [x] **`this.config` 更新时机**：只回写**已生效**的 section ⇒ 未生效的下次 diff 仍能发现，不会漏报
-  - [ ] **`database` 热重连**（待补）：需先给 `Database` 加「在途操作闸门」（重连前等在途查询/写入结束），改为回报 `applied`
+  - [x] **`database` 热重连**：`Database.reconnect()` 带**在途操作闸门**（等在途 SQL 归零 → 关旧连接 → 按新配置重新初始化；期间新 SQL 在闸门等待，`isInitialized=false` 时 `ensureReady()` 自旋兜底），失败只回报 `failed`
   - [ ] **进程级单例**（`@core/cache` / `@core/locks`）在进程内重启时不重置 —— 与真实进程重启行为不同，需评估是否由归属模块在 `restart()` 时显式清理
 - [ ] **重启 / 热更新的调用入口**：暂**不暴露 HTTP**，仅供 CLI 使用；CLI 子命令（如 `restart` / `reload`）**暂不实现具体调用**
 
