@@ -4,11 +4,17 @@ import { Closable } from '@core/lifecycle'
 import { registerConfigSection } from '@core/config'
 import { Database } from '@core/database'
 import { lockManager } from '@core/locks'
-import { formatNow } from '@core/utils'
 import { sendAlarm } from '@modules/alarmModule/utils'
 import { AlarmSpec } from '@modules/alarmModule'
-import { Direct, DirectConfig, WsDirectUpdate } from '@/types/types'
-import { ControlParams, DirectConfigRow, DirectModuleConfig, SetValueParams } from '.'
+import { Direct, DirectConfig, WsData, WsDirectUpdate } from '@/types/types'
+import {
+  ControlParams,
+  DeviceSyncTrigger,
+  DeviceSyncValues,
+  DirectConfigRow,
+  DirectModuleConfig,
+  SetValueParams,
+} from '.'
 import { DeviceSync, buildControlMessage, reportedState } from './dispatch'
 import {
   CONFIG_LIST_QUERY,
@@ -20,6 +26,7 @@ import {
   directKeyWhere,
   directValueQuery,
   filterVisibleConfigs,
+  syncInstructedQuery,
   toConfig,
   validateValue,
 } from './utils'
@@ -51,7 +58,7 @@ const RESET_ALARM: AlarmSpec = {
 /**
  * Direct（指令配置）中间模块：
  * 负责指令配置的读取与“控制值修改”，作为 HTTP / 控制总线 / 设备下发的中间层；
- * **设备状态同步**（上报 vs 指令连续 N 帧不一致 ⇒ 以设备为准）在**下发前**对账，
+ * **设备状态同步**（上报 vs 指令连续 N 帧不一致 ⇒ 以设备为准）按**上报帧**对账，
  * 实现见 `./dispatch.ts` 的 `DeviceSync`。
  */
 export class DirectModule implements Closable {
@@ -60,7 +67,7 @@ export class DirectModule implements Closable {
   /** 本模块配置节（`config.json` 的 `direct`；设备状态同步开关/帧数） */
   private config: DirectModuleConfig = { device_sync: DEFAULT_DEVICE_SYNC }
 
-  /** 设备状态同步状态机（计数由上报驱动，对账在下发前） */
+  /** 设备状态同步状态机（计数由上报驱动，达到阈值即回写） */
   private readonly deviceSync = new DeviceSync()
 
   /** 事件订阅注销句柄集合（强引用监听；close 时统一注销，解除 bus 对本实例的引用） */
@@ -74,11 +81,10 @@ export class DirectModule implements Closable {
       bus.onEvent('shutdown', () => {
         this.close()
       }),
-      // 设备状态同步：计数由上报驱动（对账在下发前）
+      // 设备状态同步：由设备上报驱动（连续 N 帧不一致 ⇒ 以设备实际状态为准回写）
       bus.onEvent('SENSOR_DATA', (data) => {
-        this.deviceSync.onReport(data.d_no, {
-          heat: reportedState(data.jia_re),
-          water: reportedState(data.shui_beng),
+        void this.syncWithDevice(data).catch((err) => {
+          logger.error(`设备状态同步失败: ${err instanceof Error ? err.message : String(err)}`)
         })
       }),
       bus.onEvent('CONFIG_CHANGED', ({ changed, config, report }) => {
@@ -160,39 +166,9 @@ export class DirectModule implements Closable {
     const { config_id, d_no, notify = true } = params
     const source = params.source ?? 'manual'
 
-    // 设备状态同步（**下发前对账**，实现在 dispatch.ts）：上报与指令连续 N 帧不一致 ⇒ 以设备实际状态为准
-    const requested = String(params.value)
-    const sync = this.config.device_sync
-    const override = sync.enabled
-      ? this.deviceSync.overrideValue(d_no, config_id, requested, sync.frames)
-      : undefined
-    const value = override ?? requested
-    const controlled = override !== undefined
-
     let storedValue: string
     try {
-      storedValue = await this.writeValue(config_id, value, d_no)
-      this.deviceSync.noteInstructed(d_no, config_id, storedValue)
-      if (controlled) {
-        const reason = `设备状态同步（连续 ${sync.frames} 帧不一致）`
-        logger.info(`设备状态同步: [${d_no}] ${config_id} 以设备为准 ${requested} → ${value}`)
-        await this.db().insert('control_log', {
-          d_no,
-          c_time: formatNow(),
-          field1: 'device',
-          field2: config_id,
-          field3: value === '1' ? 'on' : 'off',
-          field4: value,
-          field5: reason,
-        })
-        await sendAlarm(
-          this.db(),
-          d_no,
-          SYNC_ALARM,
-          `${config_id}: 指令 ${requested} → 实际 ${value}`,
-        )
-        this.deviceSync.clear(d_no)
-      }
+      storedValue = await this.writeValue(config_id, params.value, d_no)
     } catch (err) {
       // 失败也通知前端（如被保护性锁定拦截），随后原样抛出
       if (notify) {
@@ -213,11 +189,59 @@ export class DirectModule implements Closable {
       this.emitDirect({
         d_no,
         config_id,
-        source: controlled ? 'device' : source,
+        source,
         success: true,
         value: storedValue,
       })
     }
+  }
+
+  /**
+   * 设备状态同步（**上报驱动**）：每帧上报都拿「库中指令值 vs 设备上报状态」对账，
+   * 连续 `frames` 帧不一致 ⇒ **以设备实际状态为准**回写（写库 + 下发 + 控制记录 + 告警）。
+   *
+   * - 指令值取自 `direct` 表，因此页面上改的值与其他写入都能立即参与对账；
+   * - 指令值刚变化的那一帧只重新计数（见 `DeviceSync.evaluate`）；
+   * - 关闭（`enabled=false`）或 `frames ≤ 0` 时连查询都不做。
+   */
+  private async syncWithDevice(data: WsData): Promise<void> {
+    const sync = this.config.device_sync
+    if (!sync.enabled || sync.frames <= 0) return
+
+    const dNo = data.d_no
+    const instructed: DeviceSyncValues = {}
+    for (const row of await this.db().executeQuery<Direct>(syncInstructedQuery(dNo))) {
+      if (row.value === null) continue
+      if (row.config_id !== 'heat' && row.config_id !== 'water') continue
+      instructed[row.config_id] = row.value
+    }
+
+    const triggered = this.deviceSync.evaluate(
+      dNo,
+      instructed,
+      { heat: reportedState(data.jia_re), water: reportedState(data.shui_beng) },
+      sync.frames,
+    )
+    for (const item of triggered) {
+      await this.syncValue(dNo, item)
+    }
+  }
+
+  /** 以设备实际状态为准回写单个目标（写库 + 下发 + 设备来源通知 + 控制记录 + 告警） */
+  private async syncValue(dNo: string, { target, instructed, value }: DeviceSyncTrigger) {
+    logger.info(`设备状态同步: [${dNo}] ${target} 指令 ${instructed} → 实际 ${value}`)
+    await this.setValue({ config_id: target, value, d_no: dNo, source: 'device' })
+    await this.db().insert(
+      'control_log',
+      controlLogRow(
+        dNo,
+        target,
+        value,
+        `设备状态同步（连续 ${this.config.device_sync.frames} 帧不一致）`,
+        'device',
+      ),
+    )
+    await sendAlarm(this.db(), dNo, SYNC_ALARM, `${target}: 指令 ${instructed} → 实际 ${value}`)
   }
 
   /**

@@ -1,5 +1,5 @@
 import { formatNow } from '@core/utils'
-import { DirectConfigRow } from '.'
+import { DirectConfigRow, SetValueParams } from '.'
 import { DataQueryParams, DirectConfig, Where } from '@/types/types'
 
 /** Direct 模块业务错误（默认 400 参数类错误，由 HTTP 层映射为 INVALID_PARAMS） */
@@ -111,6 +111,19 @@ export function deviceDataQuery(d_no: string): DataQueryParams {
   }
 }
 
+/** direct 表按设备查开关类指令值（设备状态同步逐帧对账用） */
+export function syncInstructedQuery(d_no: string): DataQueryParams {
+  return {
+    table: 'direct',
+    columns: ['config_id', 'value'],
+    ...QUERY_BASE,
+    where: {
+      d_no: { operator: '=', value: d_no },
+      config_id: { operator: 'in', value: ['heat', 'water'] },
+    },
+  }
+}
+
 /** direct 表按「配置码 + 设备」唯一定位条件 */
 export function directKeyWhere(config_id: string, d_no: string): Where {
   return {
@@ -142,19 +155,20 @@ export function directValueQuery(config_id: string, d_no: string): DataQueryPara
 }
 
 /**
- * 控制记录行（control_log field1..5），供手动控制/复位落库。
- * field1=来源(manual/auto/config) field2=控制对象 field3=动作 field4=值 field5=理由
+ * 控制记录行（control_log field1..5），供手动控制/复位/设备状态同步落库。
+ * field1=来源(manual/auto/config/device) field2=控制对象 field3=动作 field4=值 field5=理由
  */
 export function controlLogRow(
   d_no: string,
   target: 'heat' | 'water',
-  value: '0' | '1',
+  value: string,
   reason: string,
+  source: NonNullable<SetValueParams['source']> = 'manual',
 ): Record<string, string> {
   return {
     d_no,
     c_time: formatNow(),
-    field1: 'manual',
+    field1: source,
     field2: target,
     field3: value === '1' ? 'on' : 'off',
     field4: value,

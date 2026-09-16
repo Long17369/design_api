@@ -37,14 +37,14 @@
 | `tests/core/databaseRetry.test.ts`           | 连接断开自愈：读操作重试一次（连接类错误）、写操作不重试、非连接类错误不重试、`checkHealth` 探活与跳过时机、关闭后快速失败                                       |
 | `tests/core/typesIsolation.test.ts`          | 契约目录纯净性：`src/types/` 内只允许 `./` 引用，出现外部引用即失败                                                                                              |
 | `tests/directModule/configHierarchy.test.ts` | 配置层级门控（递归隐藏、`\|` 多值、父值回退 `default_value`）                                                                                                    |
-| `tests/directModule/deviceSync.test.ts`      | 设备状态同步：上报值归一化、连续不一致计数（缺测/一致清零、指令值变化重计数）、下发前对账阈值、heat/water 独立计数、clear                                            |
+| `tests/directModule/deviceSync.test.ts`      | 设备状态同步：上报值归一化、连续不一致计数（缺测/一致清零、指令变化留宽限）、达到阈值回写、heat/water 独立计数、clear                                            |
 
 约定：组件与锁通道是**进程级单例**，用例需在 `beforeEach` 清理（`clearState` / `releaseAll`）；vitest 已配置串行执行（`fileParallelism: false`）。
 
 ## E2E / 集成脚本（`tests/e2e/`，入库）
 
 需要真实 MySQL、MQTT broker 与本地服务（HTTP 10452），**从仓库根目录运行**（脚本读 `config.json`，
-产物写到 `tmp/`）：
+产物写到 `tmp/`；用 `E2E_CONFIG=<路径>` 可指向别的配置，按该配置里的 `port` / `mqtt` 连服务与 broker）：
 
 ```bash
 (pnpm exec tsx src/main.ts > tmp/server.log 2>&1 &)   # 起服务
@@ -56,7 +56,12 @@ pnpm exec tsx tests/e2e/verify_seeds.ts               # seeds 等价性（只需
 pnpm exec tsx tests/e2e/db_pool.ts                    # 连接池排队/释放（只需数据库）
 pnpm exec tsx tests/e2e/db_recovery.ts                # 连接断开自愈（只需数据库；自带 TCP 代理）
 pnpm exec tsx tests/e2e/dry_burn.ts                   # 干烧保护：判定/锁拦截/手动复位（只需数据库）
+pnpm exec tsx tests/e2e/device_sync.ts                # 设备状态同步：按上报帧对账、以设备为准回写（需服务在跑）
 ```
+
+需要在**隔离环境**里验证（不动正在跑的服务与真机）时：复制 `config.json` 改掉 `port` 与 `mqtt.mqtt_port`，
+另起一个 mosquitto 监听该端口，再 `pnpm exec tsx src/main.ts --config <该配置>` 起第二个实例，
+最后 `E2E_CONFIG=<该配置> pnpm exec tsx tests/e2e/<脚本>.ts` 跑脚本。
 
 | 脚本                                                                                                            | 覆盖                                                                                                                                              |
 | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -67,7 +72,7 @@ pnpm exec tsx tests/e2e/dry_burn.ts                   # 干烧保护：判定/�
 | `flow_target.mjs` / `flow_resume.mjs`                                                                           | 累计流量目标、累计流量重启续算（两阶段）                                                                                                          |
 | `flow_db.mjs`                                                                                                   | 派生指标库口径（`sensor.derive.source=database`）：逐帧累加、落库帧算指标、流量总计查询（时间段/默认区间/参数校验）、清零后从 0 重新累加 |
 | `device_override.mjs`                                                                                           | 设备级配置覆盖优先级（前端改配置立即生效）                                                                                                        |
-| `device_sync.mjs` / `sensor_offline.mjs` / `sensor_spike.mjs`                                                   | 设备状态回写、离线告警（含无效上报值 6553.5/65535 按缺测不入库）、跳变标记                                                                        |
+| `device_sync.ts`  / `sensor_offline.mjs` / `sensor_spike.mjs`                                                   | 设备状态回写、离线告警（含无效上报值 6553.5/65535 按缺测不入库）、跳变标记                                                                        |
 | `ws_push.mjs`                                                                                                   | WS 定向推送与重连（`goal`）                                                                                                                       |
 | `chart.mjs`                                                                                                     | 历史图表降采样接口                                                                                                                                |
 | `config_hierarchy.mjs`                                                                                          | 配置项层级门控（`GET /api/direct/config?d_no=`）                                                                                                  |

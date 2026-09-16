@@ -139,8 +139,8 @@
   - 判定清单**落在数据库**：`sensor_data_mapper.invalid_value`（JSON 数组，逐字段配置；空/NULL = 不判定）；数据入口（`sensorModule.process`）按 mapper 剔除为**空串**（缺测），代码内不再写死哨兵常量
   - 下游天然一致：`toNum('')` → null（组件按缺测跳过）、`buildSensorRow` 跳过空值（该列**落库为 NULL**）、`pushSample`/`accumulateFlow` 跳过 null ⇒ 一处生效
   - 开关字段也纳入（旧版只覆盖四个测量量 ⇒ 65535 会一路进 WS `jia_re`/`shui_beng` 与 `field3`/`field4`）；设备状态同步对缺测本就跳过（`reportedState('')` → undefined），剔除后不再被 65535 误判为「泵/加热已关」
-- [x] 设备状态同步（2026-09-16 起**归 `directModule/dispatch.ts`**，不再属于自动控制）：设备上报开关状态与 `direct` 指令值**连续 `direct.device_sync.frames` 帧不一致** → 以**设备实际状态**为准（写 direct + 下发 + `source='device'` 通知 + `control_log(field1='device')` + `device_sync` 告警）；指令值一变化即重新计数（避免下发的控制被设备上报滞后同步回去）；**默认 0（关闭）**，可按设备启用
-  - **对账时机从「每帧」改为「下发前」**：计数仍由设备上报驱动（每帧一次），但覆盖动作发生在 `DirectModule.setValue` 写库之前 —— 没指令要下发就不做无用对账
+- [x] 设备状态同步（2026-09-16 起**归 `directModule/dispatch.ts`**，不再属于自动控制）：设备上报开关状态与 `direct` 指令值**连续 `direct.device_sync.frames` 帧不一致** → 以**设备实际状态**为准（写 direct + 下发 + `source='device'` 通知 + `control_log(field1='device')` + `device_sync` 告警）；**默认 0（关闭）**，可按设备启用
+  - **按上报帧对账**（2026-09-16 修正：一度改成「只在指令下发前对账」⇒ 没有下发动作时设备自己改了状态也不回写，已改回）：每帧上报都把「`direct` 表里的指令值 vs 设备上报状态」对账，连续达到 `frames` 帧不一致即回写；**指令值刚变化的那一帧只重新计数、不触发**（留一帧给设备执行新指令，避免刚下发的控制被设备上报滞后顶回去）；指令或上报缺测不判定
   - 开关与帧数改为 `config.json` 的 `direct.device_sync`（`config.schema.json` 默认 `{enabled:false, frames:0}`，含热更新），配置页不再有这两项（也取消设备级覆盖）
 - [x] 关泵连带关加热（两层防护，已实现）：① 引擎统一规则 —— 任何「关泵」动作若加热仍开，自动在其前面补一条「关加热」（按序跟踪，决策自身已关加热时不重复下发）；② 状态兜底 —— 水泵停止（**指令值或上报泵状态任一为「泵停」**）且加热仍开 → 立即关加热（不受启动宽限期影响，放在决策之后执行避免重复写库）
 - [x] 数据质量标记 `WsData.invalid`（已实现）：**阈值配置化**（`sensor_spike_temp`(10°C)/`sensor_spike_pressure`(20kPa)/`sensor_spike_flow`(100L/min)）+ **多帧累计防抖**（`sensor_spike_frames`，默认 0=关闭，连续 N 帧跳变才标记 invalid，恢复正常即清除）；缺测不算跳变；只在 WS `data` 上标记（前端曲线标注），不影响落库与控制
