@@ -117,6 +117,29 @@ export interface DataCount {
   count: number
 }
 
+/**
+ * 流量总计（库口径）：按落库帧的时间桶均值积分得到，单位 L。
+ * 对应接口：`GET /api/sensor/flow/total?d_no&start&end`。
+ */
+export interface FlowTotal {
+  /** 设备编号 */
+  d_no: string
+  /** 实际起算时刻（缺省时为该设备最早落库时刻；无数据为 null） */
+  start: string | null
+  /** 实际截止时刻（缺省时为该设备最新落库时刻；无数据为 null） */
+  end: string | null
+  /** 积分得到的流量总计（L，字符串保留 2 位小数） */
+  total: string
+}
+
+/**
+ * 累计流量清零结果：`devices` = 实际被清零的设备编号（无内存态也无落库帧的设备不会出现在其中）。
+ * 对应接口：`POST /api/sensor/flow/reset`。
+ */
+export interface FlowResetResult {
+  devices: string[]
+}
+
 /** WHERE 操作符：按 SQL 占位符形态分四组，类型与运行时校验均由这些常量派生 */
 export const WHERE_OPERATORS_SINGLE_VALUE = [
   '=',

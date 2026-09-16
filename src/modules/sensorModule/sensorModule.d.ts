@@ -48,9 +48,20 @@ declare module '@modules/sensorModule' {
     spikeFlow: number
   }
 
+  /** 派生指标的计算来源：`database`=按 `sensor_data` 落库帧计算，`memory`=按进程内滑窗与累加计算 */
+  type SensorDeriveSource = 'database' | 'memory'
+
+  /** 派生指标（加热速度 / 平均水流 / 流量总计）的计算来源配置 */
+  interface SensorDeriveConfig {
+    /** 计算来源 */
+    source: SensorDeriveSource
+    /** `database` 口径：相邻落库帧间隔超过该秒数则不计入流量积分（防停机/离线后凭空累加） */
+    max_gap_seconds: number
+  }
+
   /**
    * 本模块的配置节（`config.json` 的 `sensor`）。
-   * 离线监控是传感器侧的内部机制（不属于自动控制、也不进指令配置页），故开关与参数放配置文件。
+   * 离线监控、派生指标口径都是传感器侧的内部机制（不属于自动控制、也不进指令配置页），故放配置文件。
    */
   interface SensorModuleConfig {
     /** 设备离线监控 */
@@ -60,6 +71,18 @@ declare module '@modules/sensorModule' {
       /** 超过该时长未上报即判定离线（秒） */
       seconds: number
     }
+    /** 派生指标计算来源 */
+    derive: SensorDeriveConfig
+  }
+
+  /** 流量总计查询参数（`start`/`end` 缺省时取该设备最早的落库时刻 / 最新的落库时刻） */
+  interface FlowTotalQuery {
+    /** 设备编号 */
+    d_no: string
+    /** 起算时刻（'YYYY-MM-DD HH:mm:ss'） */
+    start?: string
+    /** 截止时刻（'YYYY-MM-DD HH:mm:ss'） */
+    end?: string
   }
 
   /** 设备上报轨迹（离线监控用） */
