@@ -10,7 +10,7 @@ declare module '@core/locks' {
    * `pressureZero`（压力归零 → blocked）与 `flowZero`（泵开 + 流量 0 → 关泵）覆盖，
    * 详见 `docs/TODO.md`）。成员保留以稳定对外契约，前端可能已有该枚举分支。
    */
-  type LockType = 'blocked' | 'overpressure' | 'pump_idle' | 'leak'
+  type LockType = 'blocked' | 'overpressure' | 'pump_idle' | 'leak' | 'dry_burn'
 
   /** 可被锁定的控制目标 */
   type LockTarget = 'heat' | 'water'

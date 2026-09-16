@@ -1,4 +1,5 @@
 import { AutoComponent } from '@modules/autoControl'
+import { dryBurnComponent } from './dryBurn'
 import { flowTargetComponent } from './flowTarget'
 import { flowUnchangedComponent } from './flowUnchanged'
 import { flowZeroComponent } from './flowZero'
@@ -16,6 +17,7 @@ import { tempLimitComponent } from './tempLimit'
  * 堵塞保护（block=true，命中即加锁（持久化在 device_locks，由 LockModule 负责））拆为 3 个独立判定：
  * 压力归零(10) / 累计流量不变(14) / 温度异常(16)，统一排在过压(20) 之前；
  * 流量归零(12) 已改为**可恢复的水泵空转保护**（泵运行 + 流量归零去抖 → 关泵告警，不加锁不判堵塞）。
+ * 干烧保护(90) 排在温控（PID 75 / 上下限 80）之后：命中即关加热并锁住加热，覆盖温控输出。
  */
 export const autoComponents: AutoComponent[] = [
   pressureZeroComponent,
@@ -27,4 +29,5 @@ export const autoComponents: AutoComponent[] = [
   pidTempComponent,
   tempLimitComponent,
   flowTargetComponent,
+  dryBurnComponent,
 ].sort((a, b) => a.priority - b.priority)

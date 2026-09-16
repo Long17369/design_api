@@ -205,9 +205,13 @@ export class DirectModule implements Closable {
   ): Promise<string> {
     const db = this.db()
 
-    // 保护性锁定：被锁设备禁止开启水泵（关闭动作不受限，保护动作可正常执行）
-    if (config_id === 'water' && String(value) === '1' && lockManager.isDenied(d_no, 'water')) {
-      throw new DirectModuleError('设备存在保护性锁定（如堵塞），请先手动复位')
+    // 保护性锁定：被锁的目标禁止「开启」（关闭动作不受限，保护动作可正常执行）
+    if (
+      (config_id === 'water' || config_id === 'heat') &&
+      String(value) === '1' &&
+      lockManager.isDenied(d_no, config_id)
+    ) {
+      throw new DirectModuleError('设备存在保护性锁定（如堵塞/干烧），请先手动复位')
     }
 
     const config = await this.getConfigByCode(config_id)
