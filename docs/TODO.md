@@ -140,6 +140,15 @@
 - [x] 关泵连带关加热（两层防护，已实现）：① 引擎统一规则 —— 任何「关泵」动作若加热仍开，自动在其前面补一条「关加热」（按序跟踪，决策自身已关加热时不重复下发）；② 状态兜底 —— 水泵停止（**指令值或上报泵状态任一为「泵停」**）且加热仍开 → 立即关加热（不受启动宽限期影响，放在决策之后执行避免重复写库）
 - [x] 数据质量标记 `WsData.invalid`（已实现）：**阈值配置化**（`sensor_spike_temp`(10°C)/`sensor_spike_pressure`(20kPa)/`sensor_spike_flow`(100L/min)）+ **多帧累计防抖**（`sensor_spike_frames`，默认 0=关闭，连续 N 帧跳变才标记 invalid，恢复正常即清除）；缺测不算跳变；只在 WS `data` 上标记（前端曲线标注），不影响落库与控制
 - [x] 告警类型区分：`AlarmDef` 增加 `type`（'alarm' | 'error' | 'reset'）与 `category`（写 `error_msg.field3`，默认 `'block'`）由组件自带，替代写死的 `error_msg.field3='block'`；既有组件不传新字段 → 行为不变
+- [x] **引擎瘦身①：安全联锁回位为“引擎级安全不变式”**（2026-09-16，分支 `refactor/auto-engine-split`，**纯重构不改行为**）
+  - 原先两条规则硬编码在引擎方法里（`withHeatOffBeforePumpOff` / `guardHeatWithPump`），现移到 `autoControl/interlock.ts`（纯函数，**不做成组件**）：
+    ① `ensureHeatOffBeforePumpOff`（执行决策前改写控制序列）② `enforcePumpHeatOff`（遥测兜底：泵停关加热）
+  - **为什么不做成组件**：判定组件是“看数据 → 出决策”，会被水泵启动宽限期跳过、也会被前一个决策的 `stop` 终止；而这两条是引擎必须**无条件保证**的不变式 ⇒ 由引擎在**两个固定点**调用（`execute` 前 / 主循环后、设备状态同步前），调用点只有这两处
+  - 曾经试过的错法（已废弃）：把联锁套个组件壳 + 引擎开一个 `postComponents` 特例阶段 —— “两头不靠”，跟没分离差不多
+  - **遥测兜底保留**（`enforcePumpHeatOff` 读上报泵状态）：这是该功能当初就要求的能力（设备自行停泵也要关加热），只靠下发通道拦截覆盖不到
+  - 行为保持一致：控制顺序、`control_log.field5` 文案、`pump_heat_interlock_enabled` 开关、日志行、幂等性均未变
+  - 用例：`tests/autoControl/interlock.test.ts`（10 例，含“联锁不进组件注册表”的归属断言）
+  - 待办（同一重构的后续步骤）：离线监控、设备状态同步 搬出引擎（不新增 `modules`，放 `autoControl/` 内）
 - [x] **自动控制功能开关补齐**（2026-09-16，分支 `feat/auto-switches`）：每个自动控制功能都有独立开关，可逐功能停用
   - 新增开关（`direct_config`，f_type `1` 单选 关:0|开:1）：`pressure_zero_enabled`(压力归零) / `pump_idle_enabled`(泵空转) / `overpressure_enabled`(过压) / `temp_anomaly_enabled`(温度异常) / `reverse_temp_enabled`(逆温差) / `sensor_offline_enabled`(离线告警) / `device_sync_enabled`(状态同步) / `pump_heat_interlock_enabled`(泵停连带关加热)
   - **默认值 = 加入开关前的现状行为**：原本一直生效的规则默认**开**，原本默认关闭的能力（状态同步）默认**关**；`flow_unchanged_enabled` / `sensor_spike_enabled` / `flow_target_enabled` / `pid_enabled` 维持原默认

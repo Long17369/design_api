@@ -13,13 +13,13 @@ import {
   AutoConfig,
   AutoCtx,
   AutoDecision,
-  ControlAction,
   ControlTarget,
   DeviceSeen,
   DeviceState,
   DeviceSyncState,
 } from '@modules/autoControl'
 import { autoComponents } from './components'
+import { enforcePumpHeatOff, ensureHeatOffBeforePumpOff } from './interlock'
 import { buildAutoConfig, loadConfigDefaults, pushHistory, sendAlarm, setControl } from './utils'
 
 const logger = log.getLogger('AutoControlModule')
@@ -67,8 +67,9 @@ const SYNC_ALARM: AlarmDef = {
 }
 
 /**
- * 自动控制模块：
- * 订阅 SENSOR_DATA → 读设备 auto 开关 → 按优先级跑组件 → 执行决策（控制/告警/落库）。
+ * 自动控制模块（引擎）：只做两件事——
+ * ① **编排**：订阅 SENSOR_DATA → 读设备 auto 开关 → 按 priority 跑判定组件 → 执行决策（控制/告警/落库）；
+ * ② **安全不变式**（引擎级，见 `interlock.ts`）：执行决策前补「关泵前先关加热」、全部决策后兜底「泵停关加热」。
  */
 export class AutoControlModule implements Closable {
   private database: Database | null = null
@@ -207,9 +208,9 @@ export class AutoControlModule implements Closable {
       }
     }
 
-    // 安全兜底（不受宽限期影响）：水泵已停（指令值或上报值）而加热仍开 → 立即关加热。
-    // 放在决策之后：既覆盖绕过决策的停泵场景，又避免与决策中已有的「关加热」重复写库/下发。
-    await this.guardHeatWithPump(db, dm, ctx)
+    // 引擎级安全不变式②（不受宽限期影响）：水泵已停（指令值或上报值任一为泵停）而加热仍开 → 关加热。
+    // 放在全部决策之后：既覆盖绕过决策的停泵场景，又避免与决策中已有的「关加热」重复写库/下发。
+    await this.applyInterlock(db, dm, ctx)
 
     // 设备状态同步（默认关闭）：连续 N 帧指令与上报不一致 → 以设备实际状态为准回写
     await this.syncWithDevice(db, dm, ctx)
@@ -292,7 +293,7 @@ export class AutoControlModule implements Closable {
       await this.blockDevice(ctx, reason)
     }
     if (decision.controls?.length) {
-      for (const c of this.withHeatOffBeforePumpOff(ctx, decision.controls)) {
+      for (const c of ensureHeatOffBeforePumpOff(ctx, decision.controls)) {
         // 被保护性锁定拦下的「开启」动作不卜发（如干烧锁住加热、堵塞锁住水泵）：
         // 关闭动作不受限；否则每帧都会因 DirectModule 拦截而报错
         if (c.value === '1' && lockManager.isDenied(ctx.d_no, c.target)) {
@@ -310,43 +311,14 @@ export class AutoControlModule implements Closable {
   }
 
   /**
-   * 统一安全规则①：控制序列里出现「关水泵」且此时加热仍开时，自动在**前面**补一条「关加热」。
-   * 避免水泵停机后加热器继续工作（干烧）。
-   *
-   * 注意：按序跟踪（`heatClosing`）——若决策自身已经先关了加热（如堵塞保护 [heat, water]），
-   * 则不再补重复的控制，保证一次决策对同一目标只下一次指令。
+   * 引擎级安全不变式②的执行点：泵停关加热（规则本体在 `interlock.ts`，调用点只有这一个）。
+   * 不受水泵启动宽限期与 `stop` 影响 —— 它保证的是「加热不得在无水流时通电」这条不变式。
    */
-  private withHeatOffBeforePumpOff(
-    ctx: AutoCtx,
-    controls: ControlAction[],
-  ): Array<ControlAction & { relay?: boolean }> {
-    const out: Array<ControlAction & { relay?: boolean }> = []
-    let heatClosing = ctx.values.get('heat') !== '1'
-    for (const control of controls) {
-      if (control.target === 'heat' && control.value === '0') heatClosing = true
-      if (control.target === 'water' && control.value === '0' && !heatClosing) {
-        out.push({ target: 'heat', value: '0', relay: true })
-        heatClosing = true
-      }
-      out.push(control)
-    }
-    return out
-  }
-
-  /**
-   * 统一安全规则②（状态兜底）：
-   * 水泵已停（**指令值或上报泵状态任一为泵停**）而加热仍开 → 立即关加热。
-   * 覆盖手动关泵、设备自行停泵等“绕过控制决策”的情况；不受水泵启动宽限期影响。
-   */
-  private async guardHeatWithPump(db: Database, dm: DirectModule, ctx: AutoCtx): Promise<void> {
-    if (!ctx.cfg.pumpHeatInterlockEnabled) return
-    if (ctx.values.get('heat') !== '1') return
-    const pumpStopped = ctx.values.get('water') === '0' || ctx.data.shui_beng !== '1'
-    if (!pumpStopped) return
-
+  private async applyInterlock(db: Database, dm: DirectModule, ctx: AutoCtx): Promise<void> {
+    const decision = enforcePumpHeatOff(ctx)
+    if (!decision) return
     logger.info(`水泵已停止，自动关闭加热: ${ctx.d_no}`)
-    await setControl(dm, db, ctx.d_no, 'heat', '0', '安全规则：水泵停止，关闭加热')
-    ctx.values.set('heat', '0')
+    await this.execute(db, dm, ctx, '泵热联锁', decision)
   }
 
   /**

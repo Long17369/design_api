@@ -18,6 +18,8 @@ import { tempLimitComponent } from './tempLimit'
  * 压力归零(10) / 累计流量不变(14) / 温度异常(16)，统一排在过压(20) 之前；
  * 流量归零(12) 已改为**可恢复的水泵空转保护**（泵运行 + 流量归零去抖 → 关泵告警，不加锁不判堵塞）。
  * 干烧保护(90) 排在温控（PID 75 / 上下限 80）之后：命中即关加热并锁住加热，覆盖温控输出。
+ *
+ * 泵热联锁**不在本列表**：它是引擎级安全不变式（不是判定规则），见 `../interlock.ts`。
  */
 export const autoComponents: AutoComponent[] = [
   pressureZeroComponent,
