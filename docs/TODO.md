@@ -155,6 +155,15 @@
   - `buildAutoConfig` 对未知值回退 `simple` 并 warn；兼容未迁移的 `pid_enabled=1`（视为 `pid`）
   - ⚠️ 升级需执行迁移 SQL（新行由 seeds 补，**子项改挂必须在删父行之前** —— `ref_code` 自引用 FK 会拦住删除），见 `docs/API-CHANGES.md` 升级须知
   - 本机已执行：设备级 `pid_enabled=1` 已转为该设备 `temp_control_mode=pid`（1 行）；`verify_seeds` 仅剩历史差异
+- [x] **加热棒干烧保护**（2026-09-16，分支 `feat/dry-burn`）：加热中「投了足够加热量、温度却不涨」即停加热并锁住
+  - **判据（两个条件同时满足）**：`heat_rate_window`(默认 60s) 窗口内**加热累计导通** ≥ `dry_burn_seconds`(默认 15s)，且 `WsData.heat_rate` < `dry_burn_heat_rate`(默认 0.4 °C/min，负值同样命中)
+  - **为何用「累计」而不是「连续」**：PID 是 PWM 断续加热（稳态导通段 ~2s、周期 60s），「连续加热 > N 秒」永不满足；而「加热中 + `heat_rate` 低」在稳态恒温时又会误判 → 用「累计投了多少加热 + 同期温升」才同时避开这两个坑
+  - 信号复用 sensorModule 已算好的 `heat_rate`（出水温度、同 `heat_rate_window` 窗口），不另算一套时间口径
+  - **动作**：关加热 + `dry_burn` 锁（`deny.heat` ⇒ 温控/PID 再也开不回加热）+ 告警（`code='dry_burn'`、`category='dry_burn'`，不参与堵塞预警补推）；优先级 **90**（在 PID 75 / 上下限 80 之后）⇒ 同帧内最终动作必定是关加热
+  - **与温控/PID 配合**：引擎 `execute` 对「开启」类控制先查锁，被锁拒绝的动作**不卜发**（否则每帧都会抛错）、记 debug 日志；`DirectModule.writeValue` 把锁拦截从「仅水泵」扩到「水泵 + 加热」（仍只拦开启，关闭不受限）
+  - **解除**：手动复位 `POST /api/control/reset`（释放锁并按快照恢复）；**快照固定 `heat='0'`** ⇒ 复位不会把加热自动恢复成开（干烧未排查前不得自动加热），水泵按当前状态
+  - 锁在即认为已判定（不重复告警/重复加锁），复位后条件仍成立可再次判定；锁持久化在 `device_locks`（新增锁类型 `dry_burn`），重启后仍生效
+  - 验证：`tests/autoControl/dryBurn.test.ts`（判定边界、PWM 断续、缺测、锁定/复位/再判定、与温控优先级）、`tests/e2e/dry_burn.ts`（真实库：seeds 落库 → 判定 → 锁拦 `setValue(heat=1)` → `resetBlock` 后加热保持关闭 → 可再判定）
 
 ## 锁定通道与复位（`src/core/locks/`、`directModule`）
 

@@ -248,7 +248,7 @@ UPDATE sensor_data SET field7 = NULL WHERE field7 IN (65535, 6553.5);  -- pressu
   「**温控方式**」单选 `temp_control_mode`：`关:off` / `简易:simple` / `PID:pid`，默认 `simple`。
   - **简易** = 原来的恒温上下限（低于 `temp_min` 且水泵运行 → 开加热；到 `temp_max` → 关加热）
   - **PID** = 原 PID 控温（完整 PID + PWM 开关加热）
-  - **关** = 不做温控（仅保留超温安全上限，见下）
+  - **关** = 不做温控（上下限也不参与，无人自动开加热）
 - **两种温控互斥**：选 `PID` 时简易温控（上下限）**完全不参与**（上限与下限都不动，PID 独占加热控制）；
   选 `简易` 时 PID 不参与；`关` 则都不做温控（加热仍受堵塞/过压/干烧/泵热联动等**保护**约束，但无人自动开加热）。
 - 层级：子项按温控方式显示 —— `pid_*`（PID 参数）挂在 `PID`；`temp_max`/`temp_min`/`temp_max_sensor`/`temp_min_sensor`
@@ -283,3 +283,28 @@ UPDATE sensor_data SET field7 = NULL WHERE field7 IN (65535, 6553.5);  -- pressu
   必须先跑第 2 步（子项改挂）；本机 2026-09-16 已按此顺序执行，`verify_seeds` 通过。
 - 兼容：引擎侧读到未知 `temp_control_mode` 值会回退 `simple` 并打 warn；未迁移的库若仍有
   `pid_enabled=1`，等价按 `pid` 处理（迁移完成前不会静默降级）。
+
+### 2026-09-16：加热棒干烧保护（新增 3 个配置项 + 新锁类型 `dry_burn`）
+
+- **新增配置项**（配置页自动出现，前端无需改代码）：
+
+  | code                 | 含义                     | 默认值 | 说明                                                          |
+  | -------------------- | ------------------------ | ------ | ------------------------------------------------------------- |
+  | `dry_burn_enabled`   | 干烧保护开关             | 1      | 关闭则不判定（并清判定窗口）                                  |
+  | `dry_burn_seconds`   | 干烧判定加热时长(秒)     | 15     | `heat_rate_window` 窗口内加热**累计导通**达到该时长才参与判定 |
+  | `dry_burn_heat_rate` | 干烧判定加热速度(°C/min) | 0.4    | 同期加热速度低于该值（含负值）即判干烧                        |
+
+  两个子项挂在 `dry_burn_enabled` 下；判定窗口即 `heat_rate_window`（默认 60s，与 `heat_rate` 同窗口）。
+
+- **告警**：`code='dry_burn'`、`level='error'`、`error_msg.field3='dry_burn'`（**不参与堵塞预警补推**，
+  补推只筛 `field3='block'`）；WS 仍是 `event:'alarm'`。
+
+- **锁**：新增锁类型 `dry_burn`（`deny.heat`），会写入 `device_locks` 并在重启后恢复，
+  也出现在 `event:'lock'` 推送的 `active` 列表里 —— **前端若有锁类型分支需要兼容该新值**。
+  锁定后：`POST /api/direct/update` 里的「开启加热」会被拒（与开泵被拒同样的错误），关闭动作不受限。
+
+- **手动复位行为**：`POST /api/control/reset` 仍释放该设备全部锁；干烧锁的快照固定 `heat='0'`
+  ⇒ 复位**不会**自动恢复加热（只按快照恢复水泵），干烧排查后需手动开加热。前端无需改动。
+
+- 生效方式：seeds 在服务启动时自动补上 3 个配置行，无需手工 SQL；锁表 `device_locks` 已存在，
+  `type` 列为 varchar，无需改表。

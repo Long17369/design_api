@@ -293,6 +293,12 @@ export class AutoControlModule implements Closable {
     }
     if (decision.controls?.length) {
       for (const c of this.withHeatOffBeforePumpOff(ctx, decision.controls)) {
+        // 被保护性锁定拦下的「开启」动作不卜发（如干烧锁住加热、堵塞锁住水泵）：
+        // 关闭动作不受限；否则每帧都会因 DirectModule 拦截而报错
+        if (c.value === '1' && lockManager.isDenied(ctx.d_no, c.target)) {
+          logger.debug(`目标 ${c.target} 处于保护性锁定，跳过下发: ${ctx.d_no}`)
+          continue
+        }
         const controlReason = c.relay ? `${reason}（关泵联动关加热）` : reason
         await setControl(dm, db, ctx.d_no, c.target, c.value, controlReason)
         ctx.values.set(c.target, c.value)

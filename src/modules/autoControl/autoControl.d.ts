@@ -78,6 +78,14 @@ declare module '@modules/autoControl' {
     pumpStartGrace: number
     /** 泵热联动开关：水泵已停而加热仍开时自动关加热 */
     pumpHeatInterlockEnabled: boolean
+    /** 加热速度计算窗口(秒)：`WsData.heat_rate` 与干烧判定的统计窗口 */
+    heatRateWindow: number
+    /** 干烧保护开关：关闭则该规则不参与判定 */
+    dryBurnEnabled: boolean
+    /** 干烧判定：窗口内加热累计导通时长(秒) 达到即参与判定 */
+    dryBurnSeconds: number
+    /** 干烧判定：加热速度下限(°C/min)，低于该值且加热量足够即判干烧 */
+    dryBurnHeatRate: number
     /** 累计流量不变（堵塞）判定开关：关闭则该规则不参与判定 */
     flowUnchangedEnabled: boolean
     /** 累计流量不变持续秒数（超过视为堵塞） */
