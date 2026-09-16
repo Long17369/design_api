@@ -5,19 +5,10 @@ import { Closable } from '@core/lifecycle'
 import { Database } from '@core/database'
 import { lockManager } from '@core/locks'
 import { LockSnapshot } from '@core/locks'
-import { formatNow } from '@core/utils'
 import { DirectModule } from '@modules/directModule'
 import { sendAlarm } from '@modules/alarmModule/utils'
 import { WsData } from '@/types/types'
-import {
-  AlarmDef,
-  AutoConfig,
-  AutoCtx,
-  AutoDecision,
-  ControlTarget,
-  DeviceState,
-  DeviceSyncState,
-} from '@modules/autoControl'
+import { AutoConfig, AutoCtx, AutoDecision, DeviceState } from '@modules/autoControl'
 import { autoComponents } from './components'
 import { enforcePumpHeatOff, ensureHeatOffBeforePumpOff } from './interlock'
 import { buildAutoConfig, loadConfigDefaults, pushHistory, setControl } from './utils'
@@ -31,21 +22,6 @@ const logger = log.getLogger('AutoControlModule')
  */
 const CONFIG_DEFAULTS_KEY = 'autoControl:configDefaults'
 
-/** 归一化上报的开关状态：'1'/true → '1'，'0'/false → '0'，缺失/空 → undefined */
-function reportedState(value: string | boolean | undefined | null): string | undefined {
-  if (value === undefined || value === null || value === '') return undefined
-  if (typeof value === 'boolean') return value ? '1' : '0'
-  return value === '1' ? '1' : '0'
-}
-
-/** 状态同步告警（以设备实际状态为准回写指令） */
-const SYNC_ALARM: AlarmDef = {
-  code: 'device_sync',
-  level: 'warning',
-  message: '设备状态与指令不一致，已按设备实际状态同步',
-  category: 'device_sync',
-}
-
 /**
  * 自动控制模块（引擎）：只做两件事——
  * ① **编排**：订阅 SENSOR_DATA → 读设备 auto 开关 → 按 priority 跑判定组件 → 执行决策（控制/告警/落库）；
@@ -57,8 +33,6 @@ export class AutoControlModule implements Closable {
 
   /** 各设备运行状态 */
   private readonly devices = new Map<string, DeviceState>()
-  /** 各设备状态同步计数（设备上报 vs 指令值） */
-  private readonly syncState = new Map<string, DeviceSyncState>()
   /** 串行处理链，保证按时序处理 */
   private queue: Promise<void> = Promise.resolve()
 
@@ -91,7 +65,6 @@ export class AutoControlModule implements Closable {
   public close(): void {
     this.unsubscribers.splice(0).forEach((unsubscribe) => unsubscribe())
     this.devices.clear()
-    this.syncState.clear()
     for (const comp of autoComponents) comp.clearState?.()
     this.queue = Promise.resolve()
   }
@@ -161,68 +134,6 @@ export class AutoControlModule implements Closable {
     // 引擎级安全不变式②（不受宽限期影响）：水泵已停（指令值或上报值任一为泵停）而加热仍开 → 关加热。
     // 放在全部决策之后：既覆盖绕过决策的停泵场景，又避免与决策中已有的「关加热」重复写库/下发。
     await this.applyInterlock(db, dm, ctx)
-
-    // 设备状态同步（默认关闭）：连续 N 帧指令与上报不一致 → 以设备实际状态为准回写
-    await this.syncWithDevice(db, dm, ctx)
-  }
-
-  /**
-   * 设备状态同步：设备上报的开关状态与 `direct` 指令值连续 `device_sync_frames` 帧不一致时，
-   * 以**设备实际状态**为准回写指令（写库 + 下发 + `source='device'` 通知 + 告警）。
-   *
-   * - 指令值一旦变化即重新计数：避免刚下发的控制（设备上报滞后）被立即同步回去；
-   * - `device_sync_frames=0`（默认）关闭该机制；
-   * - 上报缺测时不判定。
-   */
-  private async syncWithDevice(db: Database, dm: DirectModule, ctx: AutoCtx): Promise<void> {
-    const { cfg, d_no: dNo, values, data } = ctx
-    if (!cfg.deviceSyncEnabled || cfg.deviceSyncFrames <= 0) return
-
-    const reported: Array<[ControlTarget, string | undefined]> = [
-      ['heat', reportedState(data.jia_re)],
-      ['water', reportedState(data.shui_beng)],
-    ]
-    const record = this.syncState.get(dNo) ?? {
-      heat: null,
-      water: null,
-      heatCount: 0,
-      waterCount: 0,
-    }
-    this.syncState.set(dNo, record)
-
-    for (const [target, state] of reported) {
-      const instructed = values.get(target)
-      const countKey = target === 'heat' ? 'heatCount' : 'waterCount'
-      // 指令缺省或上报缺测：不判定（也重置计数）
-      if (instructed === undefined || state === undefined || instructed === state) {
-        record[target] = instructed ?? null
-        record[countKey] = 0
-        continue
-      }
-      // 指令值变化 → 重新计数（等设备上报跟上）
-      if (record[target] !== instructed) {
-        record[target] = instructed
-        record[countKey] = 1
-        continue
-      }
-      record[countKey] += 1
-      if (record[countKey] < cfg.deviceSyncFrames) continue
-
-      record[countKey] = 0
-      logger.info(`设备状态同步: [${dNo}] ${target} 指令 ${instructed} → 实际 ${state}`)
-      await dm.setValue({ config_id: target, value: state, d_no: dNo, source: 'device' })
-      ctx.values.set(target, state)
-      await db.insert('control_log', {
-        d_no: dNo,
-        c_time: formatNow(),
-        field1: 'device',
-        field2: target,
-        field3: state === '1' ? 'on' : 'off',
-        field4: state,
-        field5: `设备状态同步（连续 ${cfg.deviceSyncFrames} 帧不一致）`,
-      })
-      await sendAlarm(db, dNo, SYNC_ALARM, `${target}: 指令 ${instructed} → 实际 ${state}`)
-    }
   }
 
   /**

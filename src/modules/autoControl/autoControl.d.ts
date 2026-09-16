@@ -75,10 +75,6 @@ declare module '@modules/autoControl' {
     flowUnchangedEnabled: boolean
     /** 累计流量不变持续秒数（超过视为堵塞） */
     flowUnchangedSeconds: number
-    /** 状态同步开关：关闭则该机制不生效 */
-    deviceSyncEnabled: boolean
-    /** 状态同步帧数：设备上报值与指令值连续 N 帧不一致即同步（以设备为准）；0 = 关闭 */
-    deviceSyncFrames: number
     /** 温度异常（堵塞）判定开关：关闭则该规则不参与判定 */
     tempAnomalyEnabled: boolean
     /** 温度异常判定：升温1 连续上升次数 */

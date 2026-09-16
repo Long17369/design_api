@@ -82,8 +82,6 @@ export function buildAutoConfig(
     dryBurnHeatRate: numOr('dry_burn_heat_rate', 0.4),
     flowUnchangedEnabled: boolOr('flow_unchanged_enabled', true),
     flowUnchangedSeconds: numOr('flow_unchanged_seconds', 15),
-    deviceSyncEnabled: boolOr('device_sync_enabled', false),
-    deviceSyncFrames: numOr('device_sync_frames', 0),
     tempAnomalyEnabled: boolOr('temp_anomaly_enabled', true),
     temp1RiseCount: numOr('temp1_rise_count', 3),
     temp2StableDelta: numOr('temp2_stable_delta', 0.5),

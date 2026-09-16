@@ -1,4 +1,4 @@
-import { DirectModule } from '.'
+import { DirectModule, DirectModuleConfig } from '.'
 
 declare module '@modules/directModule' {
   DirectModule
@@ -53,5 +53,25 @@ declare module '@modules/directModule' {
     icon: string | null
     type: string | null
     default_value: string | null
+  }
+
+  /**
+   * 本模块的配置节（`config.json` 的 `direct`）。
+   * 设备状态同步（上报 vs 指令连续 N 帧不一致 ⇒ 以设备为准）属于"下发前对账"，
+   * 开关与帧数放配置文件（不进指令配置页）。
+   */
+  interface DirectModuleConfig {
+    device_sync: {
+      /** 内部开关：关闭则不对账 */
+      enabled: boolean
+      /** 连续不一致帧数阈值（≤0 也不对账） */
+      frames: number
+    }
+  }
+}
+
+declare module '@core/config' {
+  interface Config {
+    direct: DirectModuleConfig
   }
 }

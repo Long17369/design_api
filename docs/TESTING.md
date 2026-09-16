@@ -36,6 +36,7 @@
 | `tests/core/databaseRetry.test.ts`           | 连接断开自愈：读操作重试一次（连接类错误）、写操作不重试、非连接类错误不重试、`checkHealth` 探活与跳过时机、关闭后快速失败                                       |
 | `tests/core/typesIsolation.test.ts`          | 契约目录纯净性：`src/types/` 内只允许 `./` 引用，出现外部引用即失败                                                                                              |
 | `tests/directModule/configHierarchy.test.ts` | 配置层级门控（递归隐藏、`\|` 多值、父值回退 `default_value`）                                                                                                    |
+| `tests/directModule/deviceSync.test.ts`      | 设备状态同步：上报值归一化、连续不一致计数（缺测/一致清零、指令值变化重计数）、下发前对账阈值、heat/water 独立计数、clear                                            |
 
 约定：组件与锁通道是**进程级单例**，用例需在 `beforeEach` 清理（`clearState` / `releaseAll`）；vitest 已配置串行执行（`fileParallelism: false`）。
 

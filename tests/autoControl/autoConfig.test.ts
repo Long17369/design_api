@@ -24,7 +24,6 @@ describe('buildAutoConfig：功能开关默认值', () => {
   })
 
   it('原本默认关闭的能力默认关', () => {
-    expect(cfg.deviceSyncEnabled).toBe(false)
     expect(cfg.flowTargetEnabled).toBe(false)
   })
 
@@ -35,7 +34,6 @@ describe('buildAutoConfig：功能开关默认值', () => {
   it('默认值同时保留原有的数值/时长语义', () => {
     expect(cfg.pumpIdleSeconds).toBe(60)
     expect(cfg.reverseTempSeconds).toBe(60)
-    expect(cfg.deviceSyncFrames).toBe(0)
   })
 })
 

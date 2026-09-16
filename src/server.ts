@@ -111,6 +111,7 @@ export class Server {
     const directModule = new DirectModule()
     this.directModule = directModule
     directModule.setDatabase(database)
+    directModule.setConfig(config.direct)
     http.setDirectModule(directModule)
 
     const httpServer = http.bindServer()

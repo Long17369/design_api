@@ -38,6 +38,34 @@
         }
       }
     },
+    "direct": {
+      "type": "object",
+      "description": "指令下发模块",
+      "default": {
+        "device_sync": {
+          "enabled": false,
+          "frames": 0
+        }
+      },
+      "properties": {
+        "device_sync": {
+          "type": "object",
+          "description": "设备状态同步（内部机制，不在指令配置页）：上报与指令连续 N 帧不一致 ⇒ 下发前以设备为准",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false,
+              "description": "设备状态同步开关"
+            },
+            "frames": {
+              "type": "integer",
+              "default": 0,
+              "description": "连续不一致帧数阈值（≤0 不判定）"
+            }
+          }
+        }
+      }
+    },
     "port": {
       "type": "integer",
       "default": 3000,
