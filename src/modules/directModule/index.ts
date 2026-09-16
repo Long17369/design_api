@@ -1,12 +1,15 @@
 import { bus } from '@core/bus'
 import { log } from '@core/logger'
 import { Closable } from '@core/lifecycle'
+import { registerConfigSection } from '@core/config'
 import { Database } from '@core/database'
 import { lockManager } from '@core/locks'
 import { formatNow } from '@core/utils'
+import { sendAlarm } from '@modules/alarmModule/utils'
+import { AlarmSpec } from '@modules/alarmModule'
 import { Direct, DirectConfig, WsAlarm, WsDirectUpdate } from '@/types/types'
-import { ControlParams, DirectConfigRow, SetValueParams } from '.'
-import { buildControlMessage } from './dispatch'
+import { ControlParams, DirectConfigRow, DirectModuleConfig, SetValueParams } from '.'
+import { DeviceSync, buildControlMessage, reportedState } from './dispatch'
 import {
   CONFIG_LIST_QUERY,
   DirectModuleError,
@@ -25,24 +28,57 @@ const logger = log.getLogger('DirectModule')
 
 export { DirectModuleError }
 
+/** 设备状态同步告警（以设备实际状态为准回写指令） */
+const SYNC_ALARM: AlarmSpec = {
+  code: 'device_sync',
+  level: 'warning',
+  message: '设备状态与指令不一致，已按设备实际状态同步',
+  category: 'device_sync',
+}
+
+/** 设备状态同步的内置默认（与 `config.schema.json` 的 `direct.device_sync` 默认值一致） */
+const DEFAULT_DEVICE_SYNC: DirectModuleConfig['device_sync'] = { enabled: false, frames: 0 }
+
 /**
  * Direct（指令配置）中间模块：
- * 负责指令配置的读取与“控制值修改”，作为 HTTP / 控制总线 / 设备下发的中间层。
- *
- * 目前只提供 HTTP API 所需能力（读写 direct/direct_config 表）；
- * 真实控制下发（MQTT 发布到设备、记录控制日志等）后续再接入。
+ * 负责指令配置的读取与“控制值修改”，作为 HTTP / 控制总线 / 设备下发的中间层；
+ * **设备状态同步**（上报 vs 指令连续 N 帧不一致 ⇒ 以设备为准）在**下发前**对账，
+ * 实现见 `./dispatch.ts` 的 `DeviceSync`。
  */
 export class DirectModule implements Closable {
   private database: Database | null = null
+
+  /** 本模块配置节（`config.json` 的 `direct`；设备状态同步开关/帧数） */
+  private config: DirectModuleConfig = { device_sync: DEFAULT_DEVICE_SYNC }
+
+  /** 设备状态同步状态机（计数由上报驱动，对账在下发前） */
+  private readonly deviceSync = new DeviceSync()
 
   /** 事件订阅注销句柄集合（强引用监听；close 时统一注销，解除 bus 对本实例的引用） */
   private readonly unsubscribers: Array<() => void> = []
 
   constructor() {
     logger.info('Direct 模块已注册')
+    // 声明本组件消费的配置节（谁消费谁注册）
+    registerConfigSection({ name: 'direct', owner: 'DirectModule' })
     this.unsubscribers.push(
       bus.onEvent('shutdown', () => {
         this.close()
+      }),
+      // 设备状态同步：计数由上报驱动（对账在下发前）
+      bus.onEvent('SENSOR_DATA', (data) => {
+        this.deviceSync.onReport(data.d_no, {
+          heat: reportedState(data.jia_re),
+          water: reportedState(data.shui_beng),
+        })
+      }),
+      bus.onEvent('CONFIG_CHANGED', ({ changed, config, report }) => {
+        if (!changed.some((item) => item.section === 'direct')) return
+        this.setConfig(config.direct)
+        logger.info(
+          `配置热更新：设备状态同步 ${config.direct.device_sync.enabled ? '启用' : '停用'}（帧数 ${config.direct.device_sync.frames}）`,
+        )
+        report('direct', 'applied')
       }),
     )
   }
@@ -50,6 +86,11 @@ export class DirectModule implements Closable {
   /** 注入数据库实例（main.ts 中在 Database 初始化后调用） */
   public setDatabase(database: Database) {
     this.database = database
+  }
+
+  /** 注入本模块配置节（设备状态同步开关/帧数） */
+  public setConfig(config: DirectModuleConfig) {
+    this.config = config
   }
 
   private db(): Database {
@@ -60,10 +101,11 @@ export class DirectModule implements Closable {
   }
 
   /**
-   * 释放资源：统一注销所有事件订阅
+   * 释放资源：统一注销所有事件订阅、清空设备同步状态
    */
   public close(): void {
     this.unsubscribers.splice(0).forEach((unsubscribe) => unsubscribe())
+    this.deviceSync.clear()
   }
 
   /**
@@ -106,11 +148,42 @@ export class DirectModule implements Closable {
    * 下发报文定义见 ./dispatch.ts（设备端接口变动的唯一改动点）。
    */
   public async setValue(params: SetValueParams): Promise<void> {
-    const { config_id, value, d_no, source = 'manual', notify = true } = params
+    const { config_id, d_no, notify = true } = params
+    const source = params.source ?? 'manual'
+
+    // 设备状态同步（**下发前对账**，实现在 dispatch.ts）：上报与指令连续 N 帧不一致 ⇒ 以设备实际状态为准
+    const requested = String(params.value)
+    const sync = this.config.device_sync
+    const override = sync.enabled
+      ? this.deviceSync.overrideValue(d_no, config_id, requested, sync.frames)
+      : undefined
+    const value = override ?? requested
+    const controlled = override !== undefined
 
     let storedValue: string
     try {
       storedValue = await this.writeValue(config_id, value, d_no)
+      this.deviceSync.noteInstructed(d_no, config_id, storedValue)
+      if (controlled) {
+        const reason = `设备状态同步（连续 ${sync.frames} 帧不一致）`
+        logger.info(`设备状态同步: [${d_no}] ${config_id} 以设备为准 ${requested} → ${value}`)
+        await this.db().insert('control_log', {
+          d_no,
+          c_time: formatNow(),
+          field1: 'device',
+          field2: config_id,
+          field3: value === '1' ? 'on' : 'off',
+          field4: value,
+          field5: reason,
+        })
+        await sendAlarm(
+          this.db(),
+          d_no,
+          SYNC_ALARM,
+          `${config_id}: 指令 ${requested} → 实际 ${value}`,
+        )
+        this.deviceSync.clear(d_no)
+      }
     } catch (err) {
       // 失败也通知前端（如被保护性锁定拦截），随后原样抛出
       if (notify) {
@@ -128,7 +201,13 @@ export class DirectModule implements Closable {
     // 写库成功后：先下发设备，再通知前端（前端刷新时指令已发出）
     this.dispatch(d_no, config_id, storedValue)
     if (notify) {
-      this.emitDirect({ d_no, config_id, source, success: true, value: storedValue })
+      this.emitDirect({
+        d_no,
+        config_id,
+        source: controlled ? 'device' : source,
+        success: true,
+        value: storedValue,
+      })
     }
   }
 

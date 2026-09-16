@@ -111,6 +111,7 @@ export class Server {
     const directModule = new DirectModule()
     this.directModule = directModule
     directModule.setDatabase(database)
+    directModule.setConfig(config.direct)
     http.setDirectModule(directModule)
 
     const httpServer = http.bindServer()
@@ -132,6 +133,7 @@ export class Server {
     const sensorModule = new SensorModule()
     this.sensorModule = sensorModule
     sensorModule.setDatabase(database)
+    sensorModule.setConfig(config.sensor)
 
     const autoControl = new AutoControlModule()
     this.autoControl = autoControl

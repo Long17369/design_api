@@ -17,23 +17,8 @@ declare module '@modules/autoControl' {
     value: '0' | '1'
   }
 
-  /** 告警定义（由组件自行定义并随决策返回，不再集中翻译） */
-  interface AlarmDef {
-    code: string
-    level: 'error' | 'warning'
-    message: string
-    color?: string
-    /**
-     * WS 消息类型（默认 `'alarm'`）：
-     * `'reset'` 供前端清除该设备横幅（如离线恢复），`'error'` 用于系统级错误。
-     */
-    type?: 'alarm' | 'error' | 'reset'
-    /**
-     * `error_msg.field3` 分类（默认 `'block'`）：
-     * `block`=堵塞（参与预警补推）/ `offline`=设备离线 / 其它自定义分类。
-     */
-    category?: string
-  }
+  /** 告警定义（由组件自行定义并随决策返回；结构同告警模块的 `AlarmSpec`，单一来源） */
+  type AlarmDef = import('@modules/alarmModule').AlarmSpec
 
   /** 组件决策：命中时返回；无动作返回 null */
   interface AutoDecision {
@@ -90,14 +75,6 @@ declare module '@modules/autoControl' {
     flowUnchangedEnabled: boolean
     /** 累计流量不变持续秒数（超过视为堵塞） */
     flowUnchangedSeconds: number
-    /** 设备离线告警开关：关闭则该告警不推送 */
-    sensorOfflineEnabled: boolean
-    /** 设备离线判定秒数：超过该时长未上报即告警（5s 定时器扫描）；0 = 关闭该告警 */
-    sensorOfflineSeconds: number
-    /** 状态同步开关：关闭则该机制不生效 */
-    deviceSyncEnabled: boolean
-    /** 状态同步帧数：设备上报值与指令值连续 N 帧不一致即同步（以设备为准）；0 = 关闭 */
-    deviceSyncFrames: number
     /** 温度异常（堵塞）判定开关：关闭则该规则不参与判定 */
     tempAnomalyEnabled: boolean
     /** 温度异常判定：升温1 连续上升次数 */

@@ -2,9 +2,11 @@ import { bus } from '@core/bus'
 import { cache } from '@core/cache'
 import { log } from '@core/logger'
 import { Closable } from '@core/lifecycle'
+import { registerConfigSection } from '@core/config'
 import { Database } from '@core/database'
+import { sendAlarm } from '@modules/alarmModule/utils'
 import { DataPayload, FieldMapper, WsData } from '@/types/types'
-import { DeviceState, SensorConfig } from '@modules/sensorModule'
+import { DeviceSeen, DeviceState, SensorConfig, SensorModuleConfig } from '@modules/sensorModule'
 import {
   accumulateFlow,
   buildSensorRow,
@@ -13,6 +15,9 @@ import {
   fmt,
   hasSpike,
   intOr,
+  isOfflineDue,
+  offlineAlarm,
+  offlineRecoveredAlarm,
   parseTime,
   pushSample,
   stripInvalidValues,
@@ -31,6 +36,12 @@ const CONFIG_CACHE_KEY = 'sensorModule:config'
 /** 字段映射表缓存 key：内容 = `api_name` → `db_name` / 无效值清单；tag = `sensor_data_mapper` */
 const MAPPER_CACHE_KEY = 'sensorModule:mapper'
 
+/** 离线扫描定时器间隔(ms)：轻量 5s 扫描，不做「暂停处理」等重机制 */
+const OFFLINE_SCAN_MS = 5_000
+
+/** 离线监控的内置默认值（与 `config.schema.json` 的 `sensor.offline` 默认值一致） */
+const DEFAULT_OFFLINE: SensorModuleConfig['offline'] = { enabled: true, seconds: 60 }
+
 /**
  * 传感器数据模块：
  * 订阅 MQTT 原始上报（SENSOR_DATA_RAW）→ 计算派生指标 → 落库 sensor_data
@@ -39,8 +50,17 @@ const MAPPER_CACHE_KEY = 'sensorModule:mapper'
 export class SensorModule implements Closable {
   private database: Database | null = null
 
+  /** 本模块配置节（`config.json` 的 `sensor`；离线监控的内部开关与阈值） */
+  private config: SensorModuleConfig = { offline: DEFAULT_OFFLINE }
+
   /** 各设备处理状态（滑动窗口 / 累计流量） */
   private readonly devices = new Map<string, DeviceState>()
+
+  /** 各设备最近上报时刻（离线监控用；按上报驱动更新，定时器只读） */
+  private readonly seen = new Map<string, DeviceSeen>()
+
+  /** 离线扫描定时器（unref：不阻塞进程退出） */
+  private readonly offlineTimer: ReturnType<typeof setInterval>
 
   /** 串行处理链，保证上报按时序处理（窗口/累计状态依赖顺序） */
   private queue: Promise<void> = Promise.resolve()
@@ -50,6 +70,8 @@ export class SensorModule implements Closable {
 
   constructor() {
     logger.info('传感器数据模块已注册')
+    // 声明本组件消费的配置节（谁消费谁注册）
+    registerConfigSection({ name: 'sensor', owner: 'SensorModule' })
     this.unsubscribers.push(
       bus.onEvent('shutdown', () => {
         this.close()
@@ -57,7 +79,24 @@ export class SensorModule implements Closable {
       bus.onEvent('SENSOR_DATA_RAW', (raw) => {
         this.enqueue(raw)
       }),
+      bus.onEvent('CONFIG_CHANGED', ({ changed, config, report }) => {
+        if (!changed.some((item) => item.section === 'sensor')) return
+        this.setConfig(config.sensor)
+        logger.info(
+          `配置热更新：离线监控 ${config.sensor.offline.enabled ? '启用' : '停用'}（阈值 ${config.sensor.offline.seconds}s）`,
+        )
+        report('sensor', 'applied')
+      }),
     )
+    // 离线监控：轻量定时器扫描（与上报处理共用同一条串行链，保证时序；unref 避免阻塞退出）
+    this.offlineTimer = setInterval(() => {
+      this.queue = this.queue
+        .then(() => this.checkOffline())
+        .catch((err: unknown) => {
+          logger.error('离线扫描失败:', err)
+        })
+    }, OFFLINE_SCAN_MS)
+    this.offlineTimer.unref()
   }
 
   /** 注入数据库实例（main.ts 中在 Database 初始化后调用） */
@@ -65,10 +104,17 @@ export class SensorModule implements Closable {
     this.database = database
   }
 
-  /** 释放资源：统一注销所有事件订阅并清空设备状态 */
+  /** 注入本模块配置节（离线监控开关与阈值） */
+  public setConfig(config: SensorModuleConfig) {
+    this.config = config
+  }
+
+  /** 释放资源：统一注销所有事件订阅、停掉扫描定时器并清空设备状态 */
   public close(): void {
     this.unsubscribers.splice(0).forEach((unsubscribe) => unsubscribe())
+    clearInterval(this.offlineTimer)
     this.devices.clear()
+    this.seen.clear()
     this.queue = Promise.resolve()
   }
 
@@ -90,6 +136,8 @@ export class SensorModule implements Closable {
       logger.warn('SensorModule 尚未注入 Database，跳过处理')
       return
     }
+
+    this.trackSeen(db, payload.id)
 
     const [config, mapper] = await Promise.all([this.loadConfig(db), this.loadMapper(db)])
 
@@ -139,6 +187,42 @@ export class SensorModule implements Closable {
     logger.debug(
       `传感器数据处理完成 d_no=${data.d_no} heat_rate=${data.heat_rate} avg_flow=${data.avg_flow}`,
     )
+  }
+
+  /**
+   * 记录本次上报（离线监控）：首次见到的设备建立轨迹；之前判过离线的补一条「已恢复」推送
+   * （`type='reset'`，前端清除该设备横幅）。与 `auto` 开关无关：在线状态只取决于是否在上报。
+   */
+  private trackSeen(db: Database, dNo: string): void {
+    const now = Date.now()
+    const previous = this.seen.get(dNo)
+    if (!previous) {
+      this.seen.set(dNo, { at: now, offline: false })
+      return
+    }
+    previous.at = now
+    if (!previous.offline) return
+    previous.offline = false
+    logger.info(`设备已恢复上报: ${dNo}`)
+    void sendAlarm(db, dNo, offlineRecoveredAlarm(), '恢复上报')
+  }
+
+  /**
+   * 离线扫描（定时器驱动）：超过配置阈值未上报即告警一次（每个设备只报一次，恢复后重新计时）。
+   * 仅告警，不暂停任何处理（本模块由上报驱动，不会用旧数据决策）。
+   */
+  private async checkOffline(): Promise<void> {
+    const db = this.database
+    if (!db || this.seen.size === 0) return
+
+    const now = Date.now()
+    const { offline } = this.config
+    for (const [dNo, record] of this.seen) {
+      if (!isOfflineDue(record, offline, now)) continue
+      record.offline = true
+      logger.info(`设备离线告警: ${dNo}（${Math.round((now - record.at) / 1000)}s 未上报）`)
+      await sendAlarm(db, dNo, offlineAlarm(offline.seconds), '超时未上报')
+    }
   }
 
   /** 获取（或初始化）某设备状态 */

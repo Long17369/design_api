@@ -308,3 +308,56 @@ UPDATE sensor_data SET field7 = NULL WHERE field7 IN (65535, 6553.5);  -- pressu
 
 - 生效方式：seeds 在服务启动时自动补上 3 个配置行，无需手工 SQL；锁表 `device_locks` 已存在，
   `type` 列为 varchar，无需改表。
+
+### 2026-09-16：离线监控移出自动控制（删 2 个配置项；改为配置文件内部开关）
+
+- **配置页少了 2 项**：`sensor_offline_enabled`（离线告警开关）与 `sensor_offline_seconds`（离线判定秒数）
+  已从 `direct_config` 移除 —— 离线监控是**传感器侧的内部机制**（不属于自动控制，也不该出现在指令配置页）。
+  前端无需改代码（配置列表由后端下发，少了就不会渲染）。**注意：设备级覆盖一并取消**。
+- 替代方式：`config.json` 新增 `sensor` 节（后端内部配置，前端不可见），默认值写在 `config.schema.json`：
+
+  ```json
+  "sensor": { "offline": { "enabled": true, "seconds": 60 } }
+  ```
+
+  默认值与原先一致（开、60s）⇒ 不配置也行为不变；该节支持热更新（改文件后 `reloadConfig` 生效）。
+
+- 迁移（**子项先删**：`sensor_offline_seconds.ref_code` 指向开关，自引用 FK 会拦住父行删除）：
+
+  ```sql
+  DELETE FROM direct WHERE config_id IN ('sensor_offline_enabled','sensor_offline_seconds');
+  DELETE FROM direct_config WHERE code = 'sensor_offline_seconds';
+  DELETE FROM direct_config WHERE code = 'sensor_offline_enabled';
+  ```
+
+  本机 2026-09-16 已按此顺序执行，`verify_seeds` 通过（仅剩 5 处既有漂移）。
+- 行为保持不变：告警 `code='sensor_offline'`（warning、`field3='offline'`、`type` 默认 `alarm`）、
+  恢复 `code='sensor_online'`（`type='reset'`）、只告一次、恢复后可再次告警。
+
+### 2026-09-16：设备状态同步移出发送引擎（删 2 个配置项；改为配置文件内部开关）
+
+- **配置页又少 2 项**：`device_sync_enabled`（设备状态同步开关）与 `device_sync_frames`（连续帧数阈值）
+  已从 `direct_config` 移除 —— 设备状态同步是**下发链路自己的机制**（不属于自动控制），
+  实现搬到 `DirectModule`（在指令下发前对账）。前端无需改代码（配置列表由后端下发）。**注意：设备级覆盖一并取消**。
+- 替代方式：`config.json` 新增 `direct` 节（后端内部配置，前端不可见），默认值写在 `config.schema.json`：
+
+  ```json
+  "direct": { "device_sync": { "enabled": false, "frames": 0 } }
+  ```
+
+  默认值与原先一致（关、0 帧）⇒ 不配置也行为不变；该节支持热更新。
+- **行为差异（唯一一处）**：对账时机从「每帧」（引擎里跟着上报跑）改为**下发前**
+  —— 设备上报仍逐帧累计不一致帧数，但**只有在该指令真的要下发时**才做「以设备为准」的覆盖；
+  没有指令下发就不产生写库/告警。效果上等价：指令值一旦变化即重新计数，等设备上报跟上后
+  下一次下发就会被对账到。
+- 告警与记录不变：`code='device_sync'`（warning）、`control_log.field1='device'` /
+  `field5='设备状态同步（连续 N 帧不一致）'`、下发后推 `source='device'` 的 direct 通知。
+- 迁移（**子项先删**：`device_sync_frames.ref_code` 指向开关，自引用 FK 会拦住父行删除）：
+
+  ```sql
+  DELETE FROM direct WHERE config_id IN ('device_sync_enabled','device_sync_frames');
+  DELETE FROM direct_config WHERE code = 'device_sync_frames';
+  DELETE FROM direct_config WHERE code = 'device_sync_enabled';
+  ```
+
+  本机 2026-09-16 已按此顺序执行，`verify_seeds` 通过（仅剩 5 处既有漂移）。

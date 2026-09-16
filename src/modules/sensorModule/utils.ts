@@ -1,6 +1,13 @@
 import { DataPayload, FieldMapper, WsData } from '@/types/types'
 import { SqlValue } from '@core/database/tables'
-import { DeviceState, SensorConfig, SensorSample } from '@modules/sensorModule'
+import {
+  DeviceSeen,
+  DeviceState,
+  SensorConfig,
+  SensorModuleConfig,
+  SensorSample,
+} from '@modules/sensorModule'
+import { AlarmSpec } from '@modules/alarmModule'
 
 /** 缺失值安全转字符串（避免 String(undefined) 得到 'undefined'） */
 function toStr(value: string | number | undefined | null): string {
@@ -173,4 +180,39 @@ export function buildSensorRow(
     row[m.db_name] = typeof value === 'number' ? value : String(value)
   }
   return row
+}
+
+/** 离线告警定义（warning：只提示，不参与堵塞预警补推 ⇒ category='offline'） */
+export function offlineAlarm(seconds: number): AlarmSpec {
+  return {
+    code: 'sensor_offline',
+    level: 'warning',
+    message: `设备离线：超过 ${seconds}s 未上报数据`,
+    category: 'offline',
+  }
+}
+
+/** 离线恢复推送（type='reset' → 前端清除该设备横幅） */
+export function offlineRecoveredAlarm(): AlarmSpec {
+  return {
+    code: 'sensor_online',
+    level: 'warning',
+    message: '设备已恢复上报',
+    category: 'offline',
+    type: 'reset',
+  }
+}
+
+/**
+ * 是否该判该设备离线：开关开启、尚未判定过、距上次上报已超过阈值。
+ * 只判定一次（`record.offline` 置位后不再重复告警），恢复上报时由调用方清零。
+ */
+export function isOfflineDue(
+  record: DeviceSeen,
+  offline: SensorModuleConfig['offline'],
+  now: number,
+): boolean {
+  if (!offline.enabled || offline.seconds <= 0) return false
+  if (record.offline) return false
+  return now - record.at >= offline.seconds * 1000
 }

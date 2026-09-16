@@ -1,5 +1,44 @@
+import { bus } from '@core/bus'
+import { log } from '@core/logger'
+import { Database } from '@core/database'
+import { formatNow } from '@core/utils'
 import { WsAlarm } from '@/types/types'
-import { BlockErrorRow } from '.'
+import { AlarmSpec, BlockErrorRow } from '.'
+
+const logger = log.getLogger('AlarmUtils')
+
+/**
+ * 写告警（`error_msg`）并 WS 推送 —— **告警写入的唯一入口**（自动控制组件决策、传感器离线告警等都用它）。
+ * 文案/等级/颜色/类型/分类由调用方给出（不做集中翻译）；`reason` 仅用于日志。
+ * `error_msg.field3` 用 `alarm.category`（默认 `'block'`，供堵塞预警补推筛选）。
+ */
+export async function sendAlarm(
+  db: Database,
+  dNo: string,
+  alarm: AlarmSpec,
+  reason: string,
+): Promise<void> {
+  const cTime = formatNow()
+  await db.insert('error_msg', {
+    d_no: dNo,
+    c_time: cTime,
+    field1: alarm.message,
+    field2: alarm.code,
+    field3: alarm.category ?? 'block',
+  })
+  const data: WsAlarm = {
+    id: `alarm_${dNo}_${cTime}`,
+    d_no: dNo,
+    type: alarm.type ?? 'alarm',
+    message: alarm.message,
+    code: alarm.code,
+    level: alarm.level,
+    timestamp: cTime,
+    ...(alarm.color ? { color: alarm.color } : {}),
+  }
+  bus.emitEvent('WS_MESSAGE_OUT', { message: { event: 'alarm', data } })
+  logger.debug(`告警已推送: ${dNo} ${alarm.code} (${reason})`)
+}
 
 /**
  * 时间格式化为 'YYYY-MM-DD HH:mm:ss'（与 autoControl 落库写入的 `formatNow()` 同格式）。

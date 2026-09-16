@@ -5,22 +5,13 @@ import { Closable } from '@core/lifecycle'
 import { Database } from '@core/database'
 import { lockManager } from '@core/locks'
 import { LockSnapshot } from '@core/locks'
-import { formatNow } from '@core/utils'
 import { DirectModule } from '@modules/directModule'
+import { sendAlarm } from '@modules/alarmModule/utils'
 import { WsData } from '@/types/types'
-import {
-  AlarmDef,
-  AutoConfig,
-  AutoCtx,
-  AutoDecision,
-  ControlAction,
-  ControlTarget,
-  DeviceSeen,
-  DeviceState,
-  DeviceSyncState,
-} from '@modules/autoControl'
+import { AutoConfig, AutoCtx, AutoDecision, DeviceState } from '@modules/autoControl'
 import { autoComponents } from './components'
-import { buildAutoConfig, loadConfigDefaults, pushHistory, sendAlarm, setControl } from './utils'
+import { enforcePumpHeatOff, ensureHeatOffBeforePumpOff } from './interlock'
+import { buildAutoConfig, loadConfigDefaults, pushHistory, setControl } from './utils'
 
 const logger = log.getLogger('AutoControlModule')
 
@@ -31,44 +22,10 @@ const logger = log.getLogger('AutoControlModule')
  */
 const CONFIG_DEFAULTS_KEY = 'autoControl:configDefaults'
 
-/** 离线扫描定时器间隔(ms)：轻量 5s 扫描，不做「暂停自动控制」等重机制 */
-const OFFLINE_SCAN_MS = 5_000
-
-/** 归一化上报的开关状态：'1'/true → '1'，'0'/false → '0'，缺失/空 → undefined */
-function reportedState(value: string | boolean | undefined | null): string | undefined {
-  if (value === undefined || value === null || value === '') return undefined
-  if (typeof value === 'boolean') return value ? '1' : '0'
-  return value === '1' ? '1' : '0'
-}
-
-/** 离线告警定义 */
-const OFFLINE_ALARM = (seconds: number): AlarmDef => ({
-  code: 'sensor_offline',
-  level: 'warning',
-  message: `设备离线：超过 ${seconds}s 未上报数据`,
-  category: 'offline',
-})
-
-/** 离线恢复推送（type='reset' → 前端清除该设备横幅） */
-const OFFLINE_RECOVERED: AlarmDef = {
-  code: 'sensor_online',
-  level: 'warning',
-  message: '设备已恢复上报',
-  category: 'offline',
-  type: 'reset',
-}
-
-/** 状态同步告警（以设备实际状态为准回写指令） */
-const SYNC_ALARM: AlarmDef = {
-  code: 'device_sync',
-  level: 'warning',
-  message: '设备状态与指令不一致，已按设备实际状态同步',
-  category: 'device_sync',
-}
-
 /**
- * 自动控制模块：
- * 订阅 SENSOR_DATA → 读设备 auto 开关 → 按优先级跑组件 → 执行决策（控制/告警/落库）。
+ * 自动控制模块（引擎）：只做两件事——
+ * ① **编排**：订阅 SENSOR_DATA → 读设备 auto 开关 → 按 priority 跑判定组件 → 执行决策（控制/告警/落库）；
+ * ② **安全不变式**（引擎级，见 `interlock.ts`）：执行决策前补「关泵前先关加热」、全部决策后兜底「泵停关加热」。
  */
 export class AutoControlModule implements Closable {
   private database: Database | null = null
@@ -76,12 +33,6 @@ export class AutoControlModule implements Closable {
 
   /** 各设备运行状态 */
   private readonly devices = new Map<string, DeviceState>()
-  /** 各设备最近上报时刻（离线告警用；按上报驱动更新，定时器只读） */
-  private readonly seen = new Map<string, DeviceSeen>()
-  /** 各设备状态同步计数（设备上报 vs 指令值） */
-  private readonly syncState = new Map<string, DeviceSyncState>()
-  /** 离线扫描定时器（unref：不阻塞进程退出） */
-  private readonly offlineTimer: ReturnType<typeof setInterval>
   /** 串行处理链，保证按时序处理 */
   private queue: Promise<void> = Promise.resolve()
 
@@ -98,15 +49,6 @@ export class AutoControlModule implements Closable {
         this.enqueue(data)
       }),
     )
-    // 离线监控：轻量定时器扫描（无数据库时自动跳过；unref 避免阻塞退出）
-    this.offlineTimer = setInterval(() => {
-      this.queue = this.queue
-        .then(() => this.checkOffline())
-        .catch((err: unknown) => {
-          logger.error('离线扫描失败:', err)
-        })
-    }, OFFLINE_SCAN_MS)
-    this.offlineTimer.unref()
   }
 
   /** 注入数据库实例（记录告警/控制日志用） */
@@ -122,10 +64,7 @@ export class AutoControlModule implements Closable {
   /** 释放资源：统一注销所有事件订阅、清空设备状态与组件内部状态 */
   public close(): void {
     this.unsubscribers.splice(0).forEach((unsubscribe) => unsubscribe())
-    clearInterval(this.offlineTimer)
     this.devices.clear()
-    this.seen.clear()
-    this.syncState.clear()
     for (const comp of autoComponents) comp.clearState?.()
     this.queue = Promise.resolve()
   }
@@ -148,21 +87,6 @@ export class AutoControlModule implements Closable {
     // 设备级 auto 开关：未开启则跳过
     const direct = await dm.listByDevice(dNo)
     const values = new Map(direct.map((row) => [row.config_id, row.value ?? '']))
-
-    // 离线监控：记录本次上报；若之前判定离线则推送「已恢复」（type='reset'）
-    const now0 = Date.now()
-    const previous = this.seen.get(dNo)
-    if (previous) {
-      previous.at = now0
-      previous.values = values
-      if (previous.offline) {
-        previous.offline = false
-        logger.info(`设备已恢复上报: ${dNo}`)
-        await sendAlarm(db, dNo, OFFLINE_RECOVERED, '恢复上报')
-      }
-    } else {
-      this.seen.set(dNo, { at: now0, offline: false, values })
-    }
 
     if (values.get('auto') !== '1') {
       logger.debug(`自动控制未开启，跳过: ${dNo}`)
@@ -207,71 +131,9 @@ export class AutoControlModule implements Closable {
       }
     }
 
-    // 安全兜底（不受宽限期影响）：水泵已停（指令值或上报值）而加热仍开 → 立即关加热。
-    // 放在决策之后：既覆盖绕过决策的停泵场景，又避免与决策中已有的「关加热」重复写库/下发。
-    await this.guardHeatWithPump(db, dm, ctx)
-
-    // 设备状态同步（默认关闭）：连续 N 帧指令与上报不一致 → 以设备实际状态为准回写
-    await this.syncWithDevice(db, dm, ctx)
-  }
-
-  /**
-   * 设备状态同步：设备上报的开关状态与 `direct` 指令值连续 `device_sync_frames` 帧不一致时，
-   * 以**设备实际状态**为准回写指令（写库 + 下发 + `source='device'` 通知 + 告警）。
-   *
-   * - 指令值一旦变化即重新计数：避免刚下发的控制（设备上报滞后）被立即同步回去；
-   * - `device_sync_frames=0`（默认）关闭该机制；
-   * - 上报缺测时不判定。
-   */
-  private async syncWithDevice(db: Database, dm: DirectModule, ctx: AutoCtx): Promise<void> {
-    const { cfg, d_no: dNo, values, data } = ctx
-    if (!cfg.deviceSyncEnabled || cfg.deviceSyncFrames <= 0) return
-
-    const reported: Array<[ControlTarget, string | undefined]> = [
-      ['heat', reportedState(data.jia_re)],
-      ['water', reportedState(data.shui_beng)],
-    ]
-    const record = this.syncState.get(dNo) ?? {
-      heat: null,
-      water: null,
-      heatCount: 0,
-      waterCount: 0,
-    }
-    this.syncState.set(dNo, record)
-
-    for (const [target, state] of reported) {
-      const instructed = values.get(target)
-      const countKey = target === 'heat' ? 'heatCount' : 'waterCount'
-      // 指令缺省或上报缺测：不判定（也重置计数）
-      if (instructed === undefined || state === undefined || instructed === state) {
-        record[target] = instructed ?? null
-        record[countKey] = 0
-        continue
-      }
-      // 指令值变化 → 重新计数（等设备上报跟上）
-      if (record[target] !== instructed) {
-        record[target] = instructed
-        record[countKey] = 1
-        continue
-      }
-      record[countKey] += 1
-      if (record[countKey] < cfg.deviceSyncFrames) continue
-
-      record[countKey] = 0
-      logger.info(`设备状态同步: [${dNo}] ${target} 指令 ${instructed} → 实际 ${state}`)
-      await dm.setValue({ config_id: target, value: state, d_no: dNo, source: 'device' })
-      ctx.values.set(target, state)
-      await db.insert('control_log', {
-        d_no: dNo,
-        c_time: formatNow(),
-        field1: 'device',
-        field2: target,
-        field3: state === '1' ? 'on' : 'off',
-        field4: state,
-        field5: `设备状态同步（连续 ${cfg.deviceSyncFrames} 帧不一致）`,
-      })
-      await sendAlarm(db, dNo, SYNC_ALARM, `${target}: 指令 ${instructed} → 实际 ${state}`)
-    }
+    // 引擎级安全不变式②（不受宽限期影响）：水泵已停（指令值或上报值任一为泵停）而加热仍开 → 关加热。
+    // 放在全部决策之后：既覆盖绕过决策的停泵场景，又避免与决策中已有的「关加热」重复写库/下发。
+    await this.applyInterlock(db, dm, ctx)
   }
 
   /**
@@ -292,7 +154,7 @@ export class AutoControlModule implements Closable {
       await this.blockDevice(ctx, reason)
     }
     if (decision.controls?.length) {
-      for (const c of this.withHeatOffBeforePumpOff(ctx, decision.controls)) {
+      for (const c of ensureHeatOffBeforePumpOff(ctx, decision.controls)) {
         // 被保护性锁定拦下的「开启」动作不卜发（如干烧锁住加热、堵塞锁住水泵）：
         // 关闭动作不受限；否则每帧都会因 DirectModule 拦截而报错
         if (c.value === '1' && lockManager.isDenied(ctx.d_no, c.target)) {
@@ -310,43 +172,14 @@ export class AutoControlModule implements Closable {
   }
 
   /**
-   * 统一安全规则①：控制序列里出现「关水泵」且此时加热仍开时，自动在**前面**补一条「关加热」。
-   * 避免水泵停机后加热器继续工作（干烧）。
-   *
-   * 注意：按序跟踪（`heatClosing`）——若决策自身已经先关了加热（如堵塞保护 [heat, water]），
-   * 则不再补重复的控制，保证一次决策对同一目标只下一次指令。
+   * 引擎级安全不变式②的执行点：泵停关加热（规则本体在 `interlock.ts`，调用点只有这一个）。
+   * 不受水泵启动宽限期与 `stop` 影响 —— 它保证的是「加热不得在无水流时通电」这条不变式。
    */
-  private withHeatOffBeforePumpOff(
-    ctx: AutoCtx,
-    controls: ControlAction[],
-  ): Array<ControlAction & { relay?: boolean }> {
-    const out: Array<ControlAction & { relay?: boolean }> = []
-    let heatClosing = ctx.values.get('heat') !== '1'
-    for (const control of controls) {
-      if (control.target === 'heat' && control.value === '0') heatClosing = true
-      if (control.target === 'water' && control.value === '0' && !heatClosing) {
-        out.push({ target: 'heat', value: '0', relay: true })
-        heatClosing = true
-      }
-      out.push(control)
-    }
-    return out
-  }
-
-  /**
-   * 统一安全规则②（状态兜底）：
-   * 水泵已停（**指令值或上报泵状态任一为泵停**）而加热仍开 → 立即关加热。
-   * 覆盖手动关泵、设备自行停泵等“绕过控制决策”的情况；不受水泵启动宽限期影响。
-   */
-  private async guardHeatWithPump(db: Database, dm: DirectModule, ctx: AutoCtx): Promise<void> {
-    if (!ctx.cfg.pumpHeatInterlockEnabled) return
-    if (ctx.values.get('heat') !== '1') return
-    const pumpStopped = ctx.values.get('water') === '0' || ctx.data.shui_beng !== '1'
-    if (!pumpStopped) return
-
+  private async applyInterlock(db: Database, dm: DirectModule, ctx: AutoCtx): Promise<void> {
+    const decision = enforcePumpHeatOff(ctx)
+    if (!decision) return
     logger.info(`水泵已停止，自动关闭加热: ${ctx.d_no}`)
-    await setControl(dm, db, ctx.d_no, 'heat', '0', '安全规则：水泵停止，关闭加热')
-    ctx.values.set('heat', '0')
+    await this.execute(db, dm, ctx, '泵热联锁', decision)
   }
 
   /**
@@ -415,31 +248,6 @@ export class AutoControlModule implements Closable {
   /** 是否处于水泵启动宽限期内（仅水泵刚启动时允许宽限） */
   private inPumpGrace(state: DeviceState, cfg: AutoConfig, now: number): boolean {
     return state.pumpStartedAt !== null && now - state.pumpStartedAt < cfg.pumpStartGrace * 1000
-  }
-
-  /**
-   * 离线扫描（定时器驱动）：超过 `sensor_offline_seconds` 未上报即告警一次。
-   * 阈值按设备级覆盖取值（`seen.values` 为该设备最近一次的指令值快照）。
-   * 仅告警，不暂停自动控制（本引擎由上报驱动，不会用旧数据决策）。
-   */
-  private async checkOffline(): Promise<void> {
-    const db = this.database
-    if (!db || this.seen.size === 0) return
-    const defaults = await cache.remember(CONFIG_DEFAULTS_KEY, () => loadConfigDefaults(db), {
-      tag: 'direct_config',
-    })
-
-    const now = Date.now()
-    for (const [dNo, record] of this.seen) {
-      if (record.offline) continue
-      const cfg = buildAutoConfig(defaults, record.values)
-      if (!cfg.sensorOfflineEnabled || cfg.sensorOfflineSeconds <= 0) continue
-      if (now - record.at < cfg.sensorOfflineSeconds * 1000) continue
-
-      record.offline = true
-      logger.info(`设备离线告警: ${dNo}（${Math.round((now - record.at) / 1000)}s 未上报）`)
-      await sendAlarm(db, dNo, OFFLINE_ALARM(cfg.sensorOfflineSeconds), '超时未上报')
-    }
   }
 
   /**

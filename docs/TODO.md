@@ -126,7 +126,10 @@
 - [x] ② 迁移与写穿透失效：`Database.insert/update/delete` 成功后按表名 `invalidate`；`autoControl` 阈值缓存、`sensorModule` 的 `direct_config`/`sensor_data_mapper` 缓存（共 3 处本地 TTL）已迁入
 - [ ] ③ 评估后再考虑「全库中间件 / 表级缓存策略配置」这类更重的方案（当前写穿透已覆盖应用内写入路径）
 - [x] 设备级配置覆盖：取值优先级 **设备 `direct` 值 > `direct_config.default_value` > 内置默认**（`buildAutoConfig` 逐帧合并设备值 → 前端改配置**立即生效**）；修复原先只读全局默认值导致「前端改配置对自动控制不生效」
-- [x] 离线告警 `sensor_offline`（已实现）：引擎内 **5s 轻量定时器**（`unref` 不阻塞退出）扫描最近上报时刻，超过 `sensor_offline_seconds`(60s，支持设备级覆盖) → 写 `error_msg(field3='offline')` + WS 告警（warning，只告警一次）；恢复上报推 `type='reset'`（前端清横幅），再次离线可再次告警；**不做**旧项目的「暂停自动控制」
+- [x] 离线告警（2026-09-16 起**归 `sensorModule`**，不再属于自动控制）：本模块内 **5s 轻量定时器**（`unref` 不阻塞退出）扫描最近上报时刻，超过阈值 → 写 `error_msg(field3='offline')` + WS 告警（warning，只告一次）；恢复上报推 `type='reset'`（前端清横幅），再次离线可再次告警；**不做**旧项目的「暂停自动控制」
+  - 判据与配置：开关/阈值改为 **`config.json` 的 `sensor.offline`（`enabled`/`seconds`，默认 `true`/`60`）** —— 传感器侧内部机制，**不再是指令配置项**（原 `direct_config.sensor_offline_enabled` / `sensor_offline_seconds` 已删，含设备级覆盖）；`sensorModule` 自行注册 `sensor` 配置节并响应热更新
+  - 与 `auto` 开关无关：在线状态只看"是否在上报"；告警写入改用告警模块的统一入口 `@modules/alarmModule/utils::sendAlarm`（`AlarmSpec` 单一来源，自动控制也用它）
+  - 用例：`tests/sensorModule/sensorOffline.test.ts`、`tests/alarmModule/sendAlarm.test.ts`
 - [x] **告警改「仅状态切换时推送」**（2026-09-14）：引擎每帧执行命中的决策（不做去重）⇒ 堵塞期间**每帧**写 `error_msg` + 推 WS（实测同一次堵塞重复 4~6 条），`blocked` 锁也每帧重新 acquire（写库 + 推锁状态）
   - 堵塞三判定（`pressure_zero` / `flow_unchanged` / `temp_anomaly`）：以 **`blocked` 锁为「已推送」标志**，无锁才带 `alarm`；仍每帧维持 `block` 决策（锁即状态，手动复位后可再次推送）
   - 可自恢复的两类补**解除**推送（`type:'reset'` + `category:'release'`，前端清横幅）：`pump_idle_release`（流量恢复）、`reverse_temp_release`（温差恢复 / 停止加热）；缺测只静默重置
@@ -136,10 +139,22 @@
   - 判定清单**落在数据库**：`sensor_data_mapper.invalid_value`（JSON 数组，逐字段配置；空/NULL = 不判定）；数据入口（`sensorModule.process`）按 mapper 剔除为**空串**（缺测），代码内不再写死哨兵常量
   - 下游天然一致：`toNum('')` → null（组件按缺测跳过）、`buildSensorRow` 跳过空值（该列**落库为 NULL**）、`pushSample`/`accumulateFlow` 跳过 null ⇒ 一处生效
   - 开关字段也纳入（旧版只覆盖四个测量量 ⇒ 65535 会一路进 WS `jia_re`/`shui_beng` 与 `field3`/`field4`）；设备状态同步对缺测本就跳过（`reportedState('')` → undefined），剔除后不再被 65535 误判为「泵/加热已关」
-- [x] 设备状态同步（已实现）：设备上报开关状态与 `direct` 指令值**连续 `device_sync_frames` 帧不一致** → 以**设备实际状态**为准回写（写 direct + 下发 + `source='device'` 通知 + `control_log(field1='device')` + `device_sync` 告警）；指令值一变化即重新计数（避免下发的控制被设备上报滞后同步回去）；**默认 0（关闭）**，可按设备启用
+- [x] 设备状态同步（2026-09-16 起**归 `directModule/dispatch.ts`**，不再属于自动控制）：设备上报开关状态与 `direct` 指令值**连续 `direct.device_sync.frames` 帧不一致** → 以**设备实际状态**为准（写 direct + 下发 + `source='device'` 通知 + `control_log(field1='device')` + `device_sync` 告警）；指令值一变化即重新计数（避免下发的控制被设备上报滞后同步回去）；**默认 0（关闭）**，可按设备启用
+  - **对账时机从「每帧」改为「下发前」**：计数仍由设备上报驱动（每帧一次），但覆盖动作发生在 `DirectModule.setValue` 写库之前 —— 没指令要下发就不做无用对账
+  - 开关与帧数改为 `config.json` 的 `direct.device_sync`（`config.schema.json` 默认 `{enabled:false, frames:0}`，含热更新），配置页不再有这两项（也取消设备级覆盖）
 - [x] 关泵连带关加热（两层防护，已实现）：① 引擎统一规则 —— 任何「关泵」动作若加热仍开，自动在其前面补一条「关加热」（按序跟踪，决策自身已关加热时不重复下发）；② 状态兜底 —— 水泵停止（**指令值或上报泵状态任一为「泵停」**）且加热仍开 → 立即关加热（不受启动宽限期影响，放在决策之后执行避免重复写库）
 - [x] 数据质量标记 `WsData.invalid`（已实现）：**阈值配置化**（`sensor_spike_temp`(10°C)/`sensor_spike_pressure`(20kPa)/`sensor_spike_flow`(100L/min)）+ **多帧累计防抖**（`sensor_spike_frames`，默认 0=关闭，连续 N 帧跳变才标记 invalid，恢复正常即清除）；缺测不算跳变；只在 WS `data` 上标记（前端曲线标注），不影响落库与控制
 - [x] 告警类型区分：`AlarmDef` 增加 `type`（'alarm' | 'error' | 'reset'）与 `category`（写 `error_msg.field3`，默认 `'block'`）由组件自带，替代写死的 `error_msg.field3='block'`；既有组件不传新字段 → 行为不变
+- [x] **引擎瘦身①：安全联锁回位为“引擎级安全不变式”**（2026-09-16，分支 `refactor/auto-engine-split`，**纯重构不改行为**）
+  - 原先两条规则硬编码在引擎方法里（`withHeatOffBeforePumpOff` / `guardHeatWithPump`），现移到 `autoControl/interlock.ts`（纯函数，**不做成组件**）：
+    ① `ensureHeatOffBeforePumpOff`（执行决策前改写控制序列）② `enforcePumpHeatOff`（遥测兜底：泵停关加热）
+  - **为什么不做成组件**：判定组件是“看数据 → 出决策”，会被水泵启动宽限期跳过、也会被前一个决策的 `stop` 终止；而这两条是引擎必须**无条件保证**的不变式 ⇒ 由引擎在**两个固定点**调用（`execute` 前 / 主循环后、设备状态同步前），调用点只有这两处
+  - 曾经试过的错法（已废弃）：把联锁套个组件壳 + 引擎开一个 `postComponents` 特例阶段 —— “两头不靠”，跟没分离差不多
+  - **遥测兜底保留**（`enforcePumpHeatOff` 读上报泵状态）：这是该功能当初就要求的能力（设备自行停泵也要关加热），只靠下发通道拦截覆盖不到
+  - 行为保持一致：控制顺序、`control_log.field5` 文案、`pump_heat_interlock_enabled` 开关、日志行、幂等性均未变
+  - 用例：`tests/autoControl/interlock.test.ts`（10 例，含“联锁不进组件注册表”的归属断言）
+  - 已搬出：**离线监控 → `sensorModule`**（`a754672`）、**设备状态同步 → `directModule/dispatch.ts`**（均 2026-09-16；不新增 `modules`），引擎内已无这两块
+  - ①的调用点随之收敛：`enforcePumpHeatOff` 原本在「设备状态同步前」调用，现为**主循环后**唯一一处
 - [x] **自动控制功能开关补齐**（2026-09-16，分支 `feat/auto-switches`）：每个自动控制功能都有独立开关，可逐功能停用
   - 新增开关（`direct_config`，f_type `1` 单选 关:0|开:1）：`pressure_zero_enabled`(压力归零) / `pump_idle_enabled`(泵空转) / `overpressure_enabled`(过压) / `temp_anomaly_enabled`(温度异常) / `reverse_temp_enabled`(逆温差) / `sensor_offline_enabled`(离线告警) / `device_sync_enabled`(状态同步) / `pump_heat_interlock_enabled`(泵停连带关加热)
   - **默认值 = 加入开关前的现状行为**：原本一直生效的规则默认**开**，原本默认关闭的能力（状态同步）默认**关**；`flow_unchanged_enabled` / `sensor_spike_enabled` / `flow_target_enabled` / `pid_enabled` 维持原默认

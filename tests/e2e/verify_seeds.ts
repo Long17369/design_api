@@ -1,16 +1,16 @@
-import fs from 'node:fs'
 import mysql from 'mysql2/promise'
 import { RowDataPacket } from 'mysql2/promise'
-import { DatabaseConfig } from '@core/database'
+import { Config } from '@core/config'
 import { TABLE_SEEDS } from '../../src/core/database/seeds'
 
 /**
  * seeds 重构等价性验证：新定义（列 + 值行）必须与数据库中现有行逐列一致。
  * （库中数据由重构前的 seeds 写入，故可作为基准）
  * 运行：`pnpm exec tsx tests/e2e/verify_seeds.ts`（需在仓库根目录、依赖 dev 库）
+ *
+ * 配置一律经 `@core/config` 读取（勿直接解析 config.json）。
  */
-const parsed = JSON.parse(fs.readFileSync('config.json', 'utf8')) as { database: DatabaseConfig }
-const cfg = parsed.database
+const cfg = new Config('@root/config.json').database
 const db = await mysql.createConnection({
   host: cfg.host,
   port: cfg.port,

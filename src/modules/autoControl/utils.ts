@@ -1,16 +1,9 @@
-import { bus } from '@core/bus'
 import { log } from '@core/logger'
 import { Database } from '@core/database'
 import { formatNow } from '@core/utils'
 import { DirectModule } from '@modules/directModule'
-import { WsAlarm, WsData } from '@/types/types'
-import {
-  AlarmDef,
-  AutoConfig,
-  ControlTarget,
-  DeviceState,
-  TempControlMode,
-} from '@modules/autoControl'
+import { WsData } from '@/types/types'
+import { AutoConfig, ControlTarget, DeviceState, TempControlMode } from '@modules/autoControl'
 
 const logger = log.getLogger('AutoControlUtils')
 
@@ -89,10 +82,6 @@ export function buildAutoConfig(
     dryBurnHeatRate: numOr('dry_burn_heat_rate', 0.4),
     flowUnchangedEnabled: boolOr('flow_unchanged_enabled', true),
     flowUnchangedSeconds: numOr('flow_unchanged_seconds', 15),
-    sensorOfflineEnabled: boolOr('sensor_offline_enabled', true),
-    sensorOfflineSeconds: numOr('sensor_offline_seconds', 60),
-    deviceSyncEnabled: boolOr('device_sync_enabled', false),
-    deviceSyncFrames: numOr('device_sync_frames', 0),
     tempAnomalyEnabled: boolOr('temp_anomaly_enabled', true),
     temp1RiseCount: numOr('temp1_rise_count', 3),
     temp2StableDelta: numOr('temp2_stable_delta', 0.5),
@@ -182,34 +171,6 @@ export async function setControl(
 }
 
 /**
- * 写告警（error_msg）并 WS 推送。
- * 文案/等级/颜色/类型由命中组件的 AlarmDef 给出（不做集中翻译），reason 仅落 control_log。
- * `error_msg.field3` 用 `alarm.category`（默认 'block'，供堵塞预警补推筛选）。
+ * 写告警（`error_msg`）并 WS 推送 —— 已搬到告警模块（`@modules/alarmModule/utils`）共用。
+ * 此处不再导出，避免传感器侧（离线告警）反向依赖自动控制。
  */
-export async function sendAlarm(
-  db: Database,
-  dNo: string,
-  alarm: AlarmDef,
-  reason: string,
-): Promise<void> {
-  const cTime = formatNow()
-  await db.insert('error_msg', {
-    d_no: dNo,
-    c_time: cTime,
-    field1: alarm.message,
-    field2: alarm.code,
-    field3: alarm.category ?? 'block',
-  })
-  const data: WsAlarm = {
-    id: `alarm_${dNo}_${cTime}`,
-    d_no: dNo,
-    type: alarm.type ?? 'alarm',
-    message: alarm.message,
-    code: alarm.code,
-    level: alarm.level,
-    timestamp: cTime,
-    ...(alarm.color ? { color: alarm.color } : {}),
-  }
-  bus.emitEvent('WS_MESSAGE_OUT', { message: { event: 'alarm', data } })
-  logger.debug(`告警已推送: ${dNo} ${alarm.code} (${reason})`)
-}
