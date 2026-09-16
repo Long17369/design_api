@@ -40,6 +40,7 @@ const cli = new Cli({
   restart: () => server.restart(),
   stop: (reason) => shutdown(reason),
   endpoints: () => server.endpoints(),
+  resetFlow: (dNo) => server.resetFlow(dNo),
 })
 
 logger.info(`启动服务（配置：${options.configPath}）`)

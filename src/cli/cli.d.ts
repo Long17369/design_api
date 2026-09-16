@@ -1,3 +1,5 @@
+import { FlowResetResult } from '@/types/types'
+
 export {}
 
 declare module '@/cli' {
@@ -11,12 +13,22 @@ declare module '@/cli' {
 
   /** 运行中命令定义（命令解析与帮助文本共用同一份清单） */
   interface CliCommandDef {
-    /** 短名（单字符）；无短名时为 null（如 restart） */
+    /** 短名（单字符或多字符缩写）；无短名时为 null（如 restart） */
     short: string | null
     /** 全名（如 reload） */
     name: string
     /** 一行说明（帮助文本展示） */
     desc: string
+    /** 最大参数个数（缺省 0：带参数按未知命令处理，避免误输入） */
+    maxArgs?: number
+  }
+
+  /** 一行输入的解析结果：命令定义 + 参数 */
+  interface ResolvedCommand {
+    /** 命中的命令定义 */
+    command: CliCommandDef
+    /** 命令名之后的参数（已按空白切分） */
+    args: string[]
   }
 
   /**
@@ -32,6 +44,8 @@ declare module '@/cli' {
     stop(reason: string): void
     /** 各服务地址 */
     endpoints(): import('@gateways').ServiceEndpoint[]
+    /** 清零累计流量（省略 dNo = 所有设备） */
+    resetFlow(dNo?: string): Promise<FlowResetResult>
   }
 
   /** 底部固定布局（`Screen`）的回调与内容来源 */

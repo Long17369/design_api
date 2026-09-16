@@ -1,6 +1,7 @@
 import { SuccessResponse, ErrorResponse, ErrorCode, DataSourceDef } from '@gateways/http'
 import { Database } from '@core/database'
 import { DirectModule } from '@modules/directModule'
+import { SensorModule } from '@modules/sensorModule'
 import {
   Where,
   WhereCondition,
@@ -157,6 +158,16 @@ function parseChartTime(raw: unknown, name: 'start' | 'end'): string {
   return value.replace('T', ' ')
 }
 
+/** 解析可选的时间段参数（不传/空串返回 undefined，非法抛 HttpError(400)） */
+function parseOptionalTime(raw: unknown, name: 'start' | 'end'): string | undefined {
+  const value = firstQuery(raw)
+  if (value === undefined || value === '') return undefined
+  if (!CHART_TIME_PATTERN.test(value)) {
+    throw new HttpError(400, 'INVALID_PARAMETER', `${name} 格式应为 YYYY-MM-DD HH:mm:ss`)
+  }
+  return value.replace('T', ' ')
+}
+
 /** 解析图表桶数（可选，默认 1000，允许范围 1..10000） */
 function parseBuckets(raw: unknown): number | undefined {
   const value = firstQuery(raw)
@@ -294,6 +305,49 @@ export async function handleDataDevices(db: Database, _req: Request, res: Respon
     .map((row) => row.d_no)
     .filter((value): value is string => typeof value === 'string' && value.length > 0)
   res.status(200).json(successResponse(devices))
+}
+
+/**
+ * 处理 GET /sensor/flow/total —— 按落库帧积分得到的流量总计（L）。
+ *
+ * Query：`d_no`（必填）、`start` / `end`（可选，'YYYY-MM-DD HH:mm:ss'）：
+ * 不传 `start` 即从该设备最早的落库时刻起算，不传 `end` 即算到最新的落库时刻。
+ */
+export async function handleFlowTotal(
+  sm: SensorModule,
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const query = (req.query ?? {}) as Record<string, unknown>
+  const dNo = firstQuery(query['d_no'])
+  if (!dNo) {
+    throw new HttpError(400, 'INVALID_PARAMS', '缺少 d_no 参数')
+  }
+  const start = parseOptionalTime(query['start'], 'start')
+  const end = parseOptionalTime(query['end'], 'end')
+  const data = await sm.queryTotalFlow({
+    d_no: dNo,
+    ...(start !== undefined ? { start } : {}),
+    ...(end !== undefined ? { end } : {}),
+  })
+  res.status(200).json(successResponse(data))
+}
+
+/**
+ * 处理 POST /sensor/flow/reset —— 清零设备累计流量（内存累计态 + 最新落库帧一起归零）。
+ */
+export async function handleFlowReset(
+  sm: SensorModule,
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const body = (req.body ?? {}) as Record<string, unknown>
+  const { d_no } = body
+  if (typeof d_no !== 'string' || d_no === '') {
+    throw new HttpError(400, 'INVALID_PARAMS', '缺少 d_no 参数')
+  }
+  const data = await sm.resetTotalFlow(d_no)
+  res.status(200).json(successResponse(data))
 }
 
 /**

@@ -10,6 +10,7 @@ import { log } from '@core/logger'
 import { HttpServer, MqttGateway, ServiceEndpoint, WebSocketServer } from '@gateways'
 import { API_BASE, WS_PATH } from '@gateways/utils'
 import { AlarmModule, AutoControlModule, DirectModule, LockModule, SensorModule } from '@modules'
+import { FlowResetResult } from '@/types/types'
 
 const logger = log.getLogger('Server')
 
@@ -110,6 +111,7 @@ export class Server {
     this.sensorModule = sensorModule
     sensorModule.setDatabase(database)
     sensorModule.setConfig(config.sensor)
+    http.setSensorModule(sensorModule)
 
     const autoControl = new AutoControlModule()
     this.autoControl = autoControl
@@ -194,6 +196,18 @@ export class Server {
       })
     }
     return endpoints
+  }
+
+  /**
+   * 清零累计流量（CLI `flow` / `flowall` 的入口；`d_no` 省略时对所有设备执行）。
+   * 实际清理由传感器数据模块完成（累计流量由它持有）。
+   */
+  public resetFlow(dNo?: string): Promise<FlowResetResult> {
+    const sensorModule = this.sensorModule
+    if (!sensorModule) {
+      return Promise.reject(new Error('服务未启动，无法清零流量'))
+    }
+    return sensorModule.resetTotalFlow(dNo)
   }
 
   /**
