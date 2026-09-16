@@ -10,6 +10,9 @@ declare module '@modules/autoControl' {
   /** 温控方式：简易（上下限）/ PID / 关（均不输出温控动作，仅保留超温安全上限） */
   type TempControlMode = 'simple' | 'pid' | 'off'
 
+  /** 干烧保护监听的温度信号：out = 出水温度(`temp_out`) / in = 进水温度(`temp_in`) */
+  type DryBurnTempSensor = 'out' | 'in'
+
   /** 单条控制动作 */
   interface ControlAction {
     target: ControlTarget
@@ -68,14 +71,12 @@ declare module '@modules/autoControl' {
     pumpStartGrace: number
     /** 泵热联动开关：水泵已停而加热仍开时自动关加热 */
     pumpHeatInterlockEnabled: boolean
-    /** 加热速度计算窗口(秒)：`WsData.heat_rate` 与干烧判定的统计窗口 */
-    heatRateWindow: number
     /** 干烧保护开关：关闭则该规则不参与判定 */
     dryBurnEnabled: boolean
-    /** 干烧判定：窗口内加热累计导通时长(秒) 达到即参与判定 */
+    /** 干烧判定窗口(秒)：窗口内需持续加热（累计导通 ≈ 整窗），且温度不上升 */
     dryBurnSeconds: number
-    /** 干烧判定：加热速度下限(°C/min)，低于该值且加热量足够即判干烧 */
-    dryBurnHeatRate: number
+    /** 干烧判定监听的温度信号：出水温度(out) / 进水温度(in) */
+    dryBurnTempSensor: DryBurnTempSensor
     /** 累计流量不变（堵塞）判定开关：关闭则该规则不参与判定 */
     flowUnchangedEnabled: boolean
     /** 累计流量不变持续秒数（超过视为堵塞） */

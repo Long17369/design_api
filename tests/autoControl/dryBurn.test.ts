@@ -9,13 +9,13 @@ import { testConfig } from './config'
 
 /**
  * 加热棒干烧保护：
- * 判据 = 窗口内「加热累计导通 ≥ dry_burn_seconds」且 `heat_rate < dry_burn_heat_rate`。
- * 用累计导通（而非连续）是为了兼容 PID 的 PWM 断续加热（稳态导通段只有 2s 左右）。
+ * 判据 = 窗口（`dry_burn_seconds`）内「**整窗持续加热**」且「**监听的温度没有上升**（ΔT ≤ 0）」。
+ * 只看温度变化、不引用任何派生速率指标（`heat_rate` 缺测时保护不会静默失效）。
  */
 const D_NO = 'DRY1'
 
 const CFG = (over: Partial<AutoConfig> = {}): AutoConfig =>
-  testConfig({ dryBurnSeconds: 15, dryBurnHeatRate: 0.4, heatRateWindow: 60, ...over })
+  testConfig({ dryBurnSeconds: 15, dryBurnTempSensor: 'out', ...over })
 
 const newState = (): DeviceState => ({
   pumpOn: false,
@@ -34,7 +34,7 @@ const frame = (over: Partial<WsData> = {}): WsData => ({
   liu_liang1: '0.00',
   liu_liang2: '5',
   pressure: '5',
-  heat_rate: '0',
+  heat_rate: '',
   avg_flow: '5',
   ...over,
 })
@@ -55,6 +55,29 @@ const ctx = (
   ]),
 })
 
+/** 逐帧喂入（每帧 1s）：返回**首次**命中的决策（命中后锁生效，后续帧会返回 null） */
+function feed(
+  frames: number,
+  opts: {
+    cfg: AutoConfig
+    heat?: (index: number) => '0' | '1'
+    temp?: (index: number) => string
+    from?: number
+  },
+): ReturnType<typeof dryBurnComponent.evaluate> {
+  const from = opts.from ?? 0
+  for (let i = 0; i <= frames; i++) {
+    const decision = dryBurnComponent.evaluate(
+      ctx(
+        { wen_du2: opts.temp ? opts.temp(i) : '30' },
+        { now: from + i * 1_000, heat: opts.heat ? opts.heat(i) : '1', cfg: opts.cfg },
+      ),
+    )
+    if (decision) return decision
+  }
+  return null
+}
+
 beforeEach(() => {
   lockManager.releaseAll(D_NO)
   lockManager.clearSnapshot(D_NO)
@@ -62,29 +85,15 @@ beforeEach(() => {
   pidTempComponent.clearState?.()
 })
 
-describe('干烧判定：加热累计时长 + 加热速度', () => {
-  it('加热累计不足阈值时不判定（即使加热速度为 0）', () => {
+describe('干烧判定：整窗持续加热 + 温度没有上升', () => {
+  it('持续加热且温度不上升 → 关加热 + 加锁 + 告警', () => {
     const cfg = CFG({ dryBurnSeconds: 15 })
-    // 累计 10s（每帧 5s）
-    dryBurnComponent.evaluate(ctx({ heat_rate: '0' }, { now: 0, heat: '1', cfg }))
-    dryBurnComponent.evaluate(ctx({ heat_rate: '0' }, { now: 5_000, heat: '1', cfg }))
-    expect(
-      dryBurnComponent.evaluate(ctx({ heat_rate: '0' }, { now: 10_000, heat: '1', cfg })),
-    ).toBeNull()
-    expect(lockManager.get(D_NO, 'dry_burn')).toBeUndefined()
-  })
-
-  it('加热累计达标且加热速度低于阈值 → 关加热 + 加锁 + 告警', () => {
-    const cfg = CFG({ dryBurnSeconds: 15 })
-    dryBurnComponent.evaluate(ctx({ heat_rate: '0.1' }, { now: 0, heat: '1', cfg }))
-    dryBurnComponent.evaluate(ctx({ heat_rate: '0.1' }, { now: 8_000, heat: '1', cfg }))
-    const hit = dryBurnComponent.evaluate(
-      ctx({ heat_rate: '0.1' }, { now: 16_000, heat: '1', cfg }),
-    )
+    const hit = feed(15, { cfg, temp: () => '30' })
 
     expect(hit?.alarm?.code).toBe('dry_burn')
     expect(hit?.controls).toEqual([{ target: 'heat', value: '0' }])
     expect(hit?.stop).toBe(true)
+    expect(hit?.reason).toContain('持续加热')
 
     const lock = lockManager.get(D_NO, 'dry_burn')
     expect(lock?.deny.heat).toBe(true)
@@ -93,93 +102,94 @@ describe('干烧判定：加热累计时长 + 加热速度', () => {
     expect(lockManager.isDenied(D_NO, 'heat')).toBe(true)
   })
 
-  it('加热速度正常（≥ 阈值）不判定', () => {
+  it('温度在上升 → 不判定（加热有效）', () => {
     const cfg = CFG({ dryBurnSeconds: 15 })
-    dryBurnComponent.evaluate(ctx({ heat_rate: '1' }, { now: 0, heat: '1', cfg }))
-    dryBurnComponent.evaluate(ctx({ heat_rate: '1' }, { now: 8_000, heat: '1', cfg }))
-    expect(
-      dryBurnComponent.evaluate(ctx({ heat_rate: '1' }, { now: 16_000, heat: '1', cfg })),
-    ).toBeNull()
+    const hit = feed(15, { cfg, temp: (i) => String(30 + i * 0.5) })
+    expect(hit).toBeNull()
+    expect(lockManager.get(D_NO, 'dry_burn')).toBeUndefined()
   })
 
-  it('加热速度为负（水温反降）也判定', () => {
+  it('温度反降（ΔT < 0）同样判定', () => {
     const cfg = CFG({ dryBurnSeconds: 15 })
-    dryBurnComponent.evaluate(ctx({ heat_rate: '-0.5' }, { now: 0, heat: '1', cfg }))
-    dryBurnComponent.evaluate(ctx({ heat_rate: '-0.5' }, { now: 8_000, heat: '1', cfg }))
-    expect(
-      dryBurnComponent.evaluate(ctx({ heat_rate: '-0.5' }, { now: 16_000, heat: '1', cfg }))?.alarm
-        ?.code,
-    ).toBe('dry_burn')
+    const hit = feed(15, { cfg, temp: (i) => String(30 - i * 0.1) })
+    expect(hit?.alarm?.code).toBe('dry_burn')
   })
 
-  it('PWM 断续加热：只累计导通段（关断帧不计入）', () => {
-    const cfg = CFG({ dryBurnSeconds: 5 })
-    // 导通 2s → 关断 10s → 再导通 2s：累计 4s < 5s，不判定
-    dryBurnComponent.evaluate(ctx({ heat_rate: '0' }, { now: 0, heat: '1', cfg }))
-    dryBurnComponent.evaluate(ctx({ heat_rate: '0' }, { now: 2_000, heat: '0', cfg }))
-    dryBurnComponent.evaluate(ctx({ heat_rate: '0' }, { now: 12_000, heat: '1', cfg }))
-    expect(
-      dryBurnComponent.evaluate(ctx({ heat_rate: '0' }, { now: 14_000, heat: '0', cfg })),
-    ).toBeNull()
-
-    // 再导通 2s：累计 6s ≥ 5s → 判定
-    dryBurnComponent.evaluate(ctx({ heat_rate: '0' }, { now: 20_000, heat: '1', cfg }))
-    expect(
-      dryBurnComponent.evaluate(ctx({ heat_rate: '0' }, { now: 22_000, heat: '0', cfg }))?.alarm
-        ?.code,
-    ).toBe('dry_burn')
-  })
-
-  it('窗口外的旧加热量不再计入', () => {
-    const cfg = CFG({ dryBurnSeconds: 15, heatRateWindow: 20 })
-    dryBurnComponent.evaluate(ctx({ heat_rate: '0' }, { now: 0, heat: '1', cfg }))
-    dryBurnComponent.evaluate(ctx({ heat_rate: '0' }, { now: 16_000, heat: '1', cfg }))
-    // 20s 窗口已把首帧滚出 → 只剩 1s
-    expect(
-      dryBurnComponent.evaluate(ctx({ heat_rate: '0' }, { now: 60_000, heat: '0', cfg })),
-    ).toBeNull()
-  })
-
-  it('加热速度缺测 → 不判定', () => {
+  it('不引用派生值 heat_rate：它缺测也不影响判定', () => {
     const cfg = CFG({ dryBurnSeconds: 15 })
-    dryBurnComponent.evaluate(ctx({ heat_rate: '' }, { now: 0, heat: '1', cfg }))
-    dryBurnComponent.evaluate(ctx({ heat_rate: '' }, { now: 8_000, heat: '1', cfg }))
-    expect(
-      dryBurnComponent.evaluate(ctx({ heat_rate: '' }, { now: 16_000, heat: '1', cfg })),
-    ).toBeNull()
+    expect(frame().heat_rate).toBe('')
+    expect(feed(15, { cfg })?.alarm?.code).toBe('dry_burn')
+  })
+
+  it('窗口还没铺满（刚启动）→ 不判定', () => {
+    const cfg = CFG({ dryBurnSeconds: 15 })
+    dryBurnComponent.evaluate(ctx({}, { now: 0, heat: '1', cfg }))
+    // 只过了 5s：覆盖不足 15s × 80%
+    expect(dryBurnComponent.evaluate(ctx({}, { now: 5_000, heat: '1', cfg }))).toBeNull()
+  })
+
+  it('窗口内出现过没加热的间隙 → 不算持续加热，不判定', () => {
+    const cfg = CFG({ dryBurnSeconds: 10 })
+    // 0~5s 加热 → 6s 断了一下（PWM 关断 / 温控停加热）→ 7s 起又持续加热
+    const hit = feed(12, { cfg, heat: (i) => (i === 6 ? '0' : '1') })
+    expect(hit).toBeNull()
+    expect(lockManager.get(D_NO, 'dry_burn')).toBeUndefined()
+  })
+
+  it('恒温稳态（温度不涨但只有断续加热）不判定 —— 这正是要区分的场景', () => {
+    const cfg = CFG({ dryBurnSeconds: 15 })
+    // 模拟 PWM：每 5 帧里只有 1 帧导通，温度稳定在目标值
+    const decision = feed(30, { cfg, heat: (i) => (i % 5 === 0 ? '1' : '0') })
+    expect(decision).toBeNull()
+    expect(lockManager.get(D_NO, 'dry_burn')).toBeUndefined()
+  })
+
+  it('温度缺测（无有效值）→ 不判定', () => {
+    const cfg = CFG({ dryBurnSeconds: 15 })
+    expect(feed(15, { cfg, temp: () => '' })).toBeNull()
+    expect(lockManager.get(D_NO, 'dry_burn')).toBeUndefined()
+  })
+
+  it('窗口外的旧采样被丢弃（长时间不加热后重新铺窗）', () => {
+    const cfg = CFG({ dryBurnSeconds: 10 })
+    feed(10, { cfg })
+    // 10s 窗口把旧帧都滚出：此刻起只有 1 帧，覆盖不足 ⇒ 不判定
+    expect(dryBurnComponent.evaluate(ctx({}, { now: 60_000, heat: '1', cfg }))).toBeNull()
+  })
+
+  it('监听信号可配置：选 in 时看出水温度升温不算数', () => {
+    const cfg = CFG({ dryBurnSeconds: 15, dryBurnTempSensor: 'in' })
+    let hit: ReturnType<typeof dryBurnComponent.evaluate> = null
+    for (let i = 0; i <= 15 && !hit; i++) {
+      // 出水温度在升、进水温度不动 ⇒ 按 in 判定命中
+      hit = dryBurnComponent.evaluate(
+        ctx({ wen_du2: String(30 + i), wen_du1: '20' }, { now: i * 1_000, heat: '1', cfg }),
+      )
+    }
+    expect(hit?.alarm?.code).toBe('dry_burn')
+    expect(hit?.reason).toContain('进水温度')
   })
 
   it('开关关闭 → 不判定且清状态', () => {
     const cfg = CFG({ dryBurnEnabled: false })
-    dryBurnComponent.evaluate(ctx({ heat_rate: '0' }, { now: 0, heat: '1', cfg }))
-    dryBurnComponent.evaluate(ctx({ heat_rate: '0' }, { now: 8_000, heat: '1', cfg }))
-    expect(
-      dryBurnComponent.evaluate(ctx({ heat_rate: '0' }, { now: 16_000, heat: '1', cfg })),
-    ).toBeNull()
+    expect(feed(15, { cfg })).toBeNull()
     expect(lockManager.get(D_NO, 'dry_burn')).toBeUndefined()
   })
 
   it('已判定（锁在）→ 不重复动作与告警；手动复位后可再次判定', () => {
     const cfg = CFG({ dryBurnSeconds: 5 })
-    // 帧间隔 6s ≥ 5s：第二帧即累计达标（相邻采样间按前一帧的导通状态计时）
-    dryBurnComponent.evaluate(ctx({ heat_rate: '0' }, { now: 0, heat: '1', cfg }))
-    const first = dryBurnComponent.evaluate(ctx({ heat_rate: '0' }, { now: 6_000, heat: '1', cfg }))
+    const first = feed(5, { cfg })
     expect(first?.alarm?.code).toBe('dry_burn')
 
     // 锁在：后续帧不再返回决策（不重复写库/告警/加锁）
-    expect(
-      dryBurnComponent.evaluate(ctx({ heat_rate: '0' }, { now: 20_000, heat: '0', cfg })),
-    ).toBeNull()
+    expect(dryBurnComponent.evaluate(ctx({}, { now: 20_000, heat: '0', cfg }))).toBeNull()
 
     // 手动复位（释放锁）后条件仍成立 → 可再次判定
     lockManager.releaseAll(D_NO)
     lockManager.clearSnapshot(D_NO)
     dryBurnComponent.clearState?.(D_NO)
-    dryBurnComponent.evaluate(ctx({ heat_rate: '0' }, { now: 30_000, heat: '1', cfg }))
-    expect(
-      dryBurnComponent.evaluate(ctx({ heat_rate: '0' }, { now: 36_000, heat: '1', cfg }))?.alarm
-        ?.code,
-    ).toBe('dry_burn')
+    const again = feed(5, { cfg, from: 30_000 })
+    expect(again?.alarm?.code).toBe('dry_burn')
   })
 })
 
