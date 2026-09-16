@@ -10,6 +10,34 @@
     "database": {
       "$ref": "#/definitions/database"
     },
+    "sensor": {
+      "type": "object",
+      "description": "传感器数据模块",
+      "default": {
+        "offline": {
+          "enabled": true,
+          "seconds": 60
+        }
+      },
+      "properties": {
+        "offline": {
+          "type": "object",
+          "description": "设备离线监控（内部机制，不在指令配置页）",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "离线监控开关"
+            },
+            "seconds": {
+              "type": "integer",
+              "default": 60,
+              "description": "超过该时长未上报即告警(秒)"
+            }
+          }
+        }
+      }
+    },
     "port": {
       "type": "integer",
       "default": 3000,

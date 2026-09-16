@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { bus } from '@core/bus'
 import { AlarmDef } from '@modules/autoControl'
-import { sendAlarm } from '@modules/autoControl/utils'
-import { formatDateTime, toBlockAlarm } from '@modules/alarmModule/utils'
+import { formatDateTime, sendAlarm, toBlockAlarm } from '@modules/alarmModule/utils'
 import type { WsMessage } from '@/types/types'
 
 /** 收集 WS 推送（sendAlarm 会经 bus 广播） */

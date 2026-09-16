@@ -24,8 +24,6 @@ export function testConfig(overrides: Partial<AutoConfig> = {}): AutoConfig {
     dryBurnHeatRate: 0.4,
     flowUnchangedEnabled: true,
     flowUnchangedSeconds: 15,
-    sensorOfflineEnabled: true,
-    sensorOfflineSeconds: 60,
     deviceSyncEnabled: false,
     deviceSyncFrames: 0,
     tempAnomalyEnabled: true,

@@ -16,11 +16,12 @@
 | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `tests/autoControl/components.test.ts`       | 堵塞三判定（压力归零/流量不变/温度异常）、空转去抖、恒温上下限、流量目标、过压冷却期与锁、逆温差预警                                                             |
 | `tests/autoControl/pidTemp.test.ts`          | PID：未启用/防干烧/缺测/占空比开关/积分限幅饱和/抗积分饱和（升温段不污染稳定段）/时间量纲与 PWM 最小导通                                                         |
-| `tests/autoControl/alarm.test.ts`            | `sendAlarm` 分类/类型/颜色透传、时间归一化（UTC 字面量）、堵塞补推组装                                                                                           |
+| `tests/alarmModule/sendAlarm.test.ts`        | `sendAlarm`（告警写入统一入口）分类/类型/颜色透传、时间归一化（UTC 字面量）、堵塞补推组装                                                                        |
 | `tests/autoControl/autoConfig.test.ts`       | 阈值配置读取：功能开关默认值（等于加开关前的现状）、`direct` 设备值 > 默认值 > 内置默认、空串回退                                                                |
 | `tests/autoControl/dryBurn.test.ts`          | 干烧保护：加热累计时长阈值（含 PWM 断续只算导通段）、加热速度边界与负值、缺测/关开关不判定、锁定后不重复、复位后可再判定、优先级高于温控                         |
 | `tests/autoControl/interlock.test.ts`        | 引擎级安全不变式（泵热联锁）：泵停关加热（指令值/上报值任一为泵停、开关可关、幂等）、关泵前补关加热（不重复补、非关泵原样）、联锁不进组件注册表                  |
 | `tests/sensorModule/spike.test.ts`           | 跳变阈值边界、关闭字段、缺测不误判                                                                                                                               |
+| `tests/sensorModule/sensorOffline.test.ts`   | 离线监控判据（开关/阈值/只告一次）、离线与恢复的告警定义（code/等级/分类/type）                                                                                  |
 | `tests/sensorModule/offline.test.ts`         | 无效上报值剔除（按 `sensor_data_mapper.invalid_value` 配置：温度/压力 6553.5、流量 655.35、开关 65535；字符串/数字形态、未配置字段不动）+ 缺测不污染派生值与落库 |
 | `tests/core/cache.test.ts`                   | KV/TTL/标签失效/`remember` 只加载一次                                                                                                                            |
 | `tests/core/chart.test.ts`                   | 桶步长边界（向上取整/最小 1s）、SQL 结构与参数顺序、客户端 URL 与别名                                                                                            |

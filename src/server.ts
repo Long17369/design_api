@@ -132,6 +132,7 @@ export class Server {
     const sensorModule = new SensorModule()
     this.sensorModule = sensorModule
     sensorModule.setDatabase(database)
+    sensorModule.setConfig(config.sensor)
 
     const autoControl = new AutoControlModule()
     this.autoControl = autoControl

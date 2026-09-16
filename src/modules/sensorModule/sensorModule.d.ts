@@ -1,4 +1,4 @@
-import { SensorModule } from '.'
+import { SensorModule, SensorModuleConfig } from '.'
 import { DataPayload, WsData } from '@/types/types'
 
 declare module '@modules/sensorModule' {
@@ -46,6 +46,34 @@ declare module '@modules/sensorModule' {
     spikePressure: number
     /** 流量跳变阈值(L/min) */
     spikeFlow: number
+  }
+
+  /**
+   * 本模块的配置节（`config.json` 的 `sensor`）。
+   * 离线监控是传感器侧的内部机制（不属于自动控制、也不进指令配置页），故开关与参数放配置文件。
+   */
+  interface SensorModuleConfig {
+    /** 设备离线监控 */
+    offline: {
+      /** 内部开关：关闭则不扫描、不告警 */
+      enabled: boolean
+      /** 超过该时长未上报即判定离线（秒） */
+      seconds: number
+    }
+  }
+
+  /** 设备上报轨迹（离线监控用） */
+  interface DeviceSeen {
+    /** 最近一次上报时刻(ms) */
+    at: number
+    /** 是否已判定离线（防止按扫描周期重复告警） */
+    offline: boolean
+  }
+}
+
+declare module '@core/config' {
+  interface Config {
+    sensor: SensorModuleConfig
   }
 }
 

@@ -18,4 +18,25 @@ declare module '@modules/alarmModule' {
     /** 错误代码（前端告警码，如 pressure_zero） */
     field2: string | null
   }
+
+  /**
+   * 告警定义（调用方自带文案/等级/分类，不做集中翻译）：
+   * 自动控制的组件决策（`AutoDecision.alarm`）、传感器侧的离线告警都用这个结构。
+   */
+  interface AlarmSpec {
+    code: string
+    level: 'error' | 'warning'
+    message: string
+    color?: string
+    /**
+     * WS 消息类型（默认 `'alarm'`）：
+     * `'reset'` 供前端清除该设备横幅（如离线恢复），`'error'` 用于系统级错误。
+     */
+    type?: 'alarm' | 'error' | 'reset'
+    /**
+     * `error_msg.field3` 分类（默认 `'block'`）：
+     * `block`=堵塞（参与预警补推）/ `offline`=设备离线 / 其它自定义分类。
+     */
+    category?: string
+  }
 }

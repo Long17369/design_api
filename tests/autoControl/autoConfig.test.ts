@@ -20,7 +20,6 @@ describe('buildAutoConfig：功能开关默认值', () => {
     expect(cfg.tempAnomalyEnabled).toBe(true)
     expect(cfg.reverseTempEnabled).toBe(true)
     expect(cfg.flowUnchangedEnabled).toBe(true)
-    expect(cfg.sensorOfflineEnabled).toBe(true)
     expect(cfg.pumpHeatInterlockEnabled).toBe(true)
   })
 
@@ -37,7 +36,6 @@ describe('buildAutoConfig：功能开关默认值', () => {
     expect(cfg.pumpIdleSeconds).toBe(60)
     expect(cfg.reverseTempSeconds).toBe(60)
     expect(cfg.deviceSyncFrames).toBe(0)
-    expect(cfg.sensorOfflineSeconds).toBe(60)
   })
 })
 
