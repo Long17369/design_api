@@ -25,13 +25,13 @@ declare module '@/cli' {
    */
   interface CliHost {
     /** 配置热更新 */
-    reload(): Promise<import('@/server').ReloadResult>
+    reload(): Promise<import('@core/config').ReloadResult>
     /** 进程内重启 */
     restart(): Promise<void>
     /** 优雅关闭（通知各组件释放资源） */
     stop(reason: string): void
     /** 各服务地址 */
-    endpoints(): import('@/server').ServiceEndpoint[]
+    endpoints(): import('@gateways').ServiceEndpoint[]
   }
 
   /** 底部固定布局（`Screen`）的回调与内容来源 */

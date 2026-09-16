@@ -1,5 +1,5 @@
 import { MQTTMessageOut } from '@/types/types'
-import { ControlCommandGroup, ModbusCommand } from '.'
+import { ControlCommandGroup, DeviceSyncState, ModbusCommand } from '.'
 
 /**
  * ============ 设备端「指令下发」目标接口定义（唯一改动点）============
@@ -64,22 +64,6 @@ export function buildControlMessage(config_id: string, value: string): MQTTMessa
  * - 上报或指令缺测 → 计数清零（数据不足不判定）；
  * - 开关关闭（`direct.device_sync.enabled=false`）→ 完全不判定。
  */
-
-/** 单个控制目标的同步状态 */
-interface TargetSync {
-  /** 上一次已知的指令值（undefined 表示未知） */
-  instructed: string | undefined
-  /** 最近一次上报的状态（undefined 表示未上报/缺测） */
-  reported: string | undefined
-  /** 连续不一致帧数 */
-  count: number
-}
-
-/** 单设备的同步状态（按设备自持） */
-export interface DeviceSyncState {
-  heat: TargetSync
-  water: TargetSync
-}
 
 /** 归一化上报的开关状态：'1'/true → '1'，'0'/false → '0'，缺失/空 → undefined */
 export function reportedState(value: string | boolean | undefined | null): string | undefined {

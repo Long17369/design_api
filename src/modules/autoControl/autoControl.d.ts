@@ -17,6 +17,11 @@ declare module '@modules/autoControl' {
     value: '0' | '1'
   }
 
+  /** 关泵前补关加热时，用于标记这条控制是"联动补出来"的（决定 control_log 的理由文案） */
+  interface RelayedControl extends ControlAction {
+    relay?: boolean
+  }
+
   /** 告警定义（由组件自行定义并随决策返回；结构同告警模块的 `AlarmSpec`，单一来源） */
   type AlarmDef = import('@modules/alarmModule').AlarmSpec
 
@@ -113,26 +118,6 @@ declare module '@modules/autoControl' {
     pidCycle: number
     /** PID 检测传感器：1=升温1(temp_in) 2=升温2(temp_out) */
     pidSensor: number
-  }
-
-  /** 设备上报轨迹（离线监控用） */
-  interface DeviceSeen {
-    /** 最近一次上报时刻(ms) */
-    at: number
-    /** 是否已判定离线（防止按扫描周期重复告警） */
-    offline: boolean
-    /** 最近一次该设备的指令值快照（用于取其设备级离线阈值） */
-    values: Map<string, string>
-  }
-
-  /** 设备状态同步追踪（连续 N 帧指令与上报不一致才同步） */
-  interface DeviceSyncState {
-    /** 上次比较过的指令值（指令变化即重新计数，避免刚下发就被同步回去） */
-    heat: string | null
-    water: string | null
-    /** 连续不一致帧数 */
-    heatCount: number
-    waterCount: number
   }
 
   /** 单设备运行状态（仅引擎级状态；组件私有计时/激活态由各组件自持） */

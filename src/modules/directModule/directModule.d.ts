@@ -20,6 +20,20 @@ declare module '@modules/directModule' {
     on: ModbusCommand
     off: ModbusCommand
   }
+  /** 设备状态同步：单个控制目标的追踪状态 */
+  interface TargetSync {
+    /** 上一次已知的指令值（undefined 表示未知） */
+    instructed: string | undefined
+    /** 最近一次上报的状态（undefined 表示未上报/缺测） */
+    reported: string | undefined
+    /** 连续不一致帧数 */
+    count: number
+  }
+  /** 设备状态同步：单设备状态（按设备自持；计数由上报驱动，对账在下发前） */
+  interface DeviceSyncState {
+    heat: TargetSync
+    water: TargetSync
+  }
   /** 手动控制参数（HTTP POST /api/control） */
   interface ControlParams {
     target: 'heat' | 'water'

@@ -50,6 +50,23 @@ declare module '@core/config' {
     /** 应用结果回报：组件处理完自己的 section 后调用**一次**；超时未回报按 `failed` 处理 */
     report: (section: ConfigSectionName, status: ConfigApplyStatus) => void
   }
+
+  /**
+   * 配置热更新结果（`Server.reloadConfig()` 汇总各归属组件的回报）。
+   * `Server` 只广播变更与汇总结果，不代改任何 section。
+   */
+  interface ReloadResult {
+    /** 有变更的 section（为空表示配置未变） */
+    changed: ConfigChange[]
+    /** 是否至少有一个 section 已生效 */
+    applied: boolean
+    /** 已按新配置生效的 section */
+    appliedSections: ConfigSectionName[]
+    /** 未生效的 section（应用失败 / 超时未回报） */
+    failedSections: ConfigSectionName[]
+    /** 不可热更、需完整 `restart()` 才能生效的 section（如 `port` / `database`） */
+    pendingRestart: ConfigSectionName[]
+  }
 }
 
 declare module '@core/bus' {

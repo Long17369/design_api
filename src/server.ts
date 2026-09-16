@@ -1,13 +1,13 @@
 import { bus } from '@core/bus'
 import { cache } from '@core/cache'
 import { Config } from '@core/config'
-import type { ConfigApplyStatus, ConfigChange, ConfigSectionName } from '@core/config'
+import type { ConfigApplyStatus, ConfigSectionName, ReloadResult } from '@core/config'
 import { applyConfigChanges, diffConfigSections } from '@core/config/utils'
 import { lockManager } from '@core/locks'
 import { Database } from '@core/database'
 import type { Closable } from '@core/lifecycle'
 import { log } from '@core/logger'
-import { HttpServer, MqttGateway, WebSocketServer } from '@gateways'
+import { HttpServer, MqttGateway, ServiceEndpoint, WebSocketServer } from '@gateways'
 import { API_BASE, WS_PATH } from '@gateways/utils'
 import { AlarmModule, AutoControlModule, DirectModule, LockModule, SensorModule } from '@modules'
 
@@ -20,30 +20,6 @@ const NO_CHANGE: ReloadResult = {
   appliedSections: [],
   failedSections: [],
   pendingRestart: [],
-}
-
-/** 热更新结果 */
-export interface ReloadResult {
-  /** 有变更的 section（为空表示配置未变） */
-  changed: ConfigChange[]
-  /** 是否至少有一个 section 已生效 */
-  applied: boolean
-  /** 已按新配置生效的 section */
-  appliedSections: ConfigSectionName[]
-  /** 未生效的 section（应用失败 / 超时未回报） */
-  failedSections: ConfigSectionName[]
-  /** 不可热更、需完整 `restart()` 才能生效的 section（如 `port` / `database`） */
-  pendingRestart: ConfigSectionName[]
-}
-
-/** 服务地址（CLI `u` 命令展示） */
-export interface ServiceEndpoint {
-  /** 服务名（HTTP / WebSocket / MQTT / MySQL） */
-  name: string
-  /** `listen` = 本服务监听；`connect` = 本服务连接的依赖 */
-  role: 'listen' | 'connect'
-  /** 地址 */
-  url: string
 }
 
 /**

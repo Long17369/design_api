@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Cli, COMMANDS, helpText, resolveCommand } from '@/cli'
 import { CliHost } from '@/cli'
-import { ReloadResult, ServiceEndpoint } from '@/server'
+import { ReloadResult } from '@core/config'
+import { ServiceEndpoint } from '@gateways'
 
 const EMPTY_RESULT: ReloadResult = {
   changed: [],

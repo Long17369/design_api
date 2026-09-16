@@ -1,4 +1,4 @@
-import { AutoCtx, AutoDecision, ControlAction } from '@modules/autoControl'
+import { AutoCtx, AutoDecision, ControlAction, RelayedControl } from '@modules/autoControl'
 
 /**
  * 引擎级安全不变式：**加热只在有水流时允许通电**（泵热联锁）。
@@ -9,11 +9,6 @@ import { AutoCtx, AutoDecision, ControlAction } from '@modules/autoControl'
  * - `ensureHeatOffBeforePumpOff`：**执行决策前**改写控制序列（关水泵前先关加热）；
  * - `enforcePumpHeatOff`：**全部决策执行完、设备状态同步之前**兜底（泵已停而加热仍开 → 立刻关加热）。
  */
-
-/** 关泵前补关加热时，用于标记这条控制是"联动补出来"的（决定 control_log 的理由文案） */
-export interface RelayedControl extends ControlAction {
-  relay?: boolean
-}
 
 /**
  * 不变式①：控制序列里出现「关水泵」且此时加热仍开时，自动在**前面**补一条「关加热」
