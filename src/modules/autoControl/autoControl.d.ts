@@ -51,8 +51,12 @@ declare module '@modules/autoControl' {
 
   /** 自动控制阈值配置（来自 direct_config.default_value） */
   interface AutoConfig {
+    /** 压力归零（堵塞）判定开关：关闭则该规则不参与判定 */
+    pressureZeroEnabled: boolean
     /** 压力过低阈值 */
     pressureZero: number
+    /** 过压保护开关：关闭则不再新增过压锁定（已有锁仍按原语义处理） */
+    overpressureEnabled: boolean
     /** 压力过高阈值(kPa) */
     overpressureLimit: number
     /** 过压冷却期时长(秒)：冷却期内禁止重新开泵；0 = 不加限时锁 */
@@ -63,18 +67,28 @@ declare module '@modules/autoControl' {
     overpressureOnRelease: 'hold' | 'resume'
     /** 瞬时流量归零阈值 */
     flowRateZero: number
+    /** 水泵空转保护开关：关闭则该规则不参与判定 */
+    pumpIdleEnabled: boolean
     /** 水泵空转判定秒数：水泵运行中且流量归零持续该时长 → 关泵 + 告警；0 = 关闭该保护 */
     pumpIdleSeconds: number
     /** 水泵启动宽限期(秒)：仅水泵刚启动时生效 */
     pumpStartGrace: number
+    /** 泵热联动开关：水泵已停而加热仍开时自动关加热 */
+    pumpHeatInterlockEnabled: boolean
     /** 累计流量不变（堵塞）判定开关：关闭则该规则不参与判定 */
     flowUnchangedEnabled: boolean
     /** 累计流量不变持续秒数（超过视为堵塞） */
     flowUnchangedSeconds: number
+    /** 设备离线告警开关：关闭则该告警不推送 */
+    sensorOfflineEnabled: boolean
     /** 设备离线判定秒数：超过该时长未上报即告警（5s 定时器扫描）；0 = 关闭该告警 */
     sensorOfflineSeconds: number
+    /** 状态同步开关：关闭则该机制不生效 */
+    deviceSyncEnabled: boolean
     /** 状态同步帧数：设备上报值与指令值连续 N 帧不一致即同步（以设备为准）；0 = 关闭 */
     deviceSyncFrames: number
+    /** 温度异常（堵塞）判定开关：关闭则该规则不参与判定 */
+    tempAnomalyEnabled: boolean
     /** 温度异常判定：升温1 连续上升次数 */
     temp1RiseCount: number
     /** 温度异常判定：升温2 允许波动(°C) */
@@ -87,6 +101,8 @@ declare module '@modules/autoControl' {
     tempMaxSensor: number
     /** 恒温下限检测传感器：1=升温1(temp_in) 2=升温2(temp_out) */
     tempMinSensor: number
+    /** 逆温差预警开关：关闭则该规则不参与判定 */
+    reverseTempEnabled: boolean
     /** 逆温差阈值(°C)：加热中出水低于进水该值以上即视为异常 */
     reverseTempDelta: number
     /** 逆温差持续秒数：超过该时长才预警 */

@@ -225,7 +225,7 @@ export class AutoControlModule implements Closable {
    */
   private async syncWithDevice(db: Database, dm: DirectModule, ctx: AutoCtx): Promise<void> {
     const { cfg, d_no: dNo, values, data } = ctx
-    if (cfg.deviceSyncFrames <= 0) return
+    if (!cfg.deviceSyncEnabled || cfg.deviceSyncFrames <= 0) return
 
     const reported: Array<[ControlTarget, string | undefined]> = [
       ['heat', reportedState(data.jia_re)],
@@ -333,6 +333,7 @@ export class AutoControlModule implements Closable {
    * 覆盖手动关泵、设备自行停泵等“绕过控制决策”的情况；不受水泵启动宽限期影响。
    */
   private async guardHeatWithPump(db: Database, dm: DirectModule, ctx: AutoCtx): Promise<void> {
+    if (!ctx.cfg.pumpHeatInterlockEnabled) return
     if (ctx.values.get('heat') !== '1') return
     const pumpStopped = ctx.values.get('water') === '0' || ctx.data.shui_beng !== '1'
     if (!pumpStopped) return
@@ -426,7 +427,7 @@ export class AutoControlModule implements Closable {
     for (const [dNo, record] of this.seen) {
       if (record.offline) continue
       const cfg = buildAutoConfig(defaults, record.values)
-      if (cfg.sensorOfflineSeconds <= 0) continue
+      if (!cfg.sensorOfflineEnabled || cfg.sensorOfflineSeconds <= 0) continue
       if (now - record.at < cfg.sensorOfflineSeconds * 1000) continue
 
       record.offline = true

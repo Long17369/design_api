@@ -49,7 +49,7 @@ function stateOf(dNo: string): IdleState {
  * - 去抖状态由组件自持（`since`/`fired`），流量恢复或泵停即重置。
  *
  * 堵塞（需手动复位）仍由其它判定负责：压力归零 / 累计流量不变 / 温度异常。
- * 相关配置：flow_rate_zero / pump_idle_seconds
+ * 相关配置：pump_idle_enabled（开关）/ flow_rate_zero / pump_idle_seconds
  */
 export const flowZeroComponent: AutoComponent = {
   id: 'flow_zero',
@@ -63,8 +63,8 @@ export const flowZeroComponent: AutoComponent = {
     const { cfg, d_no: dNo, values, now } = ctx
     const state = stateOf(dNo)
 
-    // 保护未启用：不动作（并清状态）
-    if (cfg.pumpIdleSeconds <= 0) {
+    // 保护未启用（开关关闭或时长为 0）：不动作（并清状态）
+    if (!cfg.pumpIdleEnabled || cfg.pumpIdleSeconds <= 0) {
       state.since = null
       state.fired = false
       return null

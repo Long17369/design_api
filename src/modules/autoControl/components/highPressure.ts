@@ -30,7 +30,8 @@ const RELEASE_ALARM: AlarmDef = {
  * - 锁定前快照存于锁（手动复位 `POST /api/control/reset` 也按此恢复）。
  *
  * 幂等：冷却期内直接返回 null；恢复时只对「快照为开且当前不是开」的目标生成控制。
- * 相关配置：overpressure_limit / overpressure_delay / overpressure_auto_release / overpressure_on_release
+ * 相关配置：overpressure_enabled（开关）/ overpressure_limit / overpressure_delay /
+ * overpressure_auto_release / overpressure_on_release
  */
 export const highPressureComponent: AutoComponent = {
   id: 'high_pressure',
@@ -87,8 +88,9 @@ export const highPressureComponent: AutoComponent = {
 
     const pressure = toNum(ctx.data.pressure)
     if (pressure === null || pressure <= cfg.overpressureLimit) return null
+    // 开关关闭：不新增过压锁定（已有锁仍走上面的冷却/解除分支）
+    if (!cfg.overpressureEnabled) return null
 
-    // 超压 → 先加冷却锁（记录锁定前快照），再关加热 + 关水泵
     lockManager.acquire({
       type: 'overpressure',
       d_no: dNo,

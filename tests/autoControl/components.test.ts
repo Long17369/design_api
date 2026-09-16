@@ -6,42 +6,20 @@ import { flowZeroComponent } from '@modules/autoControl/components/flowZero'
 import { highPressureComponent } from '@modules/autoControl/components/highPressure'
 import { pressureZeroComponent } from '@modules/autoControl/components/pressureZero'
 import { reverseTempComponent } from '@modules/autoControl/components/reverseTemp'
+import { tempAnomalyComponent } from '@modules/autoControl/components/tempAnomaly'
 import { tempLimitComponent } from '@modules/autoControl/components/tempLimit'
 import { isTempAnomaly } from '@modules/autoControl/utils'
 import { AutoConfig, DeviceState } from '@modules/autoControl'
 import type { WsData } from '@/types/types'
+import { testConfig } from './config'
 
-const CFG: AutoConfig = {
+const CFG: AutoConfig = testConfig({
   pressureZero: 0.01,
   overpressureLimit: 5,
   overpressureDelay: 2,
   overpressureAutoRelease: true,
-  overpressureOnRelease: 'resume',
-  flowRateZero: 0.01,
-  pumpIdleSeconds: 60,
-  pumpStartGrace: 10,
-  flowUnchangedEnabled: true,
-  flowUnchangedSeconds: 15,
-  sensorOfflineSeconds: 60,
-  deviceSyncFrames: 0,
-  temp1RiseCount: 3,
-  temp2StableDelta: 0.5,
-  tempMax: 35,
-  tempMin: 10,
-  tempMaxSensor: 2,
-  tempMinSensor: 2,
-  reverseTempDelta: 2,
   reverseTempSeconds: 5,
-  flowTargetEnabled: true,
-  totalFlowTarget: 100,
-  pidEnabled: false,
-  pidTarget: 30,
-  pidKp: 4,
-  pidKi: 0.02,
-  pidKd: 0.5,
-  pidCycle: 60,
-  pidSensor: 2,
-}
+})
 
 const newState = (): DeviceState => ({
   pumpOn: false,
@@ -467,5 +445,82 @@ describe('逆温差预警（组件自持状态）', () => {
       ),
     ).toBeNull()
     reverseTempComponent.clearState?.(dNo2)
+  })
+})
+
+describe('功能开关：关闭即不判定', () => {
+  const off = (over: Partial<AutoConfig>): AutoConfig => ({ ...CFG, ...over })
+
+  it('压力归零：关开关后压力为 0 也不动作', () => {
+    expect(pressureZeroComponent.evaluate(ctx({ pressure: '5' }, { cfg: off({}) }))).toBeNull()
+
+    const hit = pressureZeroComponent.evaluate(ctx({ pressure: '0' }, { cfg: off({}) }))
+    expect(hit?.block).toBe(true)
+
+    const disabled = ctx(
+      { pressure: '0' },
+      { cfg: off({ pressureZeroEnabled: false }), dNo: 'SW_P0' },
+    )
+    expect(pressureZeroComponent.evaluate(disabled)).toBeNull()
+    expect(lockManager.getActive('SW_P0')).toHaveLength(0)
+  })
+
+  it('温度异常：关开关后连判定所需历史都不再收集', () => {
+    const cfg = off({ tempAnomalyEnabled: false })
+    expect(tempAnomalyComponent.historyLength?.(ctx({}, { cfg }))).toBe(1)
+    expect(tempAnomalyComponent.evaluate(ctx({}, { cfg }))).toBeNull()
+  })
+
+  it('泵空转：关开关后持续归零也不关泵', () => {
+    const cfg = off({ pumpIdleEnabled: false, pumpIdleSeconds: 3 })
+    const dNo = 'SW_IDLE'
+    flowZeroComponent.clearState?.(dNo)
+    const values = { water: '1' }
+    expect(
+      flowZeroComponent.evaluate(
+        ctx({ liu_liang2: '0', shui_beng: '1' }, { now: 1_000, cfg, dNo, values }),
+      ),
+    ).toBeNull()
+    expect(
+      flowZeroComponent.evaluate(
+        ctx({ liu_liang2: '0', shui_beng: '1' }, { now: 10_000, cfg, dNo, values }),
+      ),
+    ).toBeNull()
+  })
+
+  it('逆温差：关开关后满足条件也不告警', () => {
+    const cfg = off({ reverseTempEnabled: false })
+    const dNo = 'SW_RT'
+    const reverse = { wen_du1: '35', wen_du2: '30' }
+    const values = { heat: '1' }
+    reverseTempComponent.clearState?.(dNo)
+    expect(reverseTempComponent.evaluate(ctx(reverse, { now: 1_000, cfg, dNo, values }))).toBeNull()
+    expect(
+      reverseTempComponent.evaluate(ctx(reverse, { now: 99_000, cfg, dNo, values })),
+    ).toBeNull()
+  })
+
+  it('过压：关开关后不再新增锁定，但已有锁仍能按冷却期解除', () => {
+    const dNo = 'SW_HP'
+    lockManager.releaseAll(dNo)
+    lockManager.clearSnapshot(dNo)
+    const cfg = off({ overpressureEnabled: false })
+
+    // 压力超阈值但开关关闭 → 不加锁、不动作
+    expect(highPressureComponent.evaluate(ctx({ pressure: '50' }, { cfg, dNo }))).toBeNull()
+    expect(lockManager.get(dNo, 'overpressure')).toBeUndefined()
+
+    // 已存在的锁（冷却期已满）仍会被解除，避免关开关后设备永久锁定
+    lockManager.acquire({
+      type: 'overpressure',
+      d_no: dNo,
+      deny: { water: true },
+      reason: '测试预置',
+      snapshot: { heat: '0', water: '0' },
+      expiresAt: 1,
+    })
+    const released = highPressureComponent.evaluate(ctx({ pressure: '0' }, { cfg, dNo }))
+    expect(released?.alarm?.code).toBe('overpressure_release')
+    expect(lockManager.get(dNo, 'overpressure')).toBeUndefined()
   })
 })

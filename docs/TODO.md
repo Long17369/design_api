@@ -140,6 +140,14 @@
 - [x] 关泵连带关加热（两层防护，已实现）：① 引擎统一规则 —— 任何「关泵」动作若加热仍开，自动在其前面补一条「关加热」（按序跟踪，决策自身已关加热时不重复下发）；② 状态兜底 —— 水泵停止（**指令值或上报泵状态任一为「泵停」**）且加热仍开 → 立即关加热（不受启动宽限期影响，放在决策之后执行避免重复写库）
 - [x] 数据质量标记 `WsData.invalid`（已实现）：**阈值配置化**（`sensor_spike_temp`(10°C)/`sensor_spike_pressure`(20kPa)/`sensor_spike_flow`(100L/min)）+ **多帧累计防抖**（`sensor_spike_frames`，默认 0=关闭，连续 N 帧跳变才标记 invalid，恢复正常即清除）；缺测不算跳变；只在 WS `data` 上标记（前端曲线标注），不影响落库与控制
 - [x] 告警类型区分：`AlarmDef` 增加 `type`（'alarm' | 'error' | 'reset'）与 `category`（写 `error_msg.field3`，默认 `'block'`）由组件自带，替代写死的 `error_msg.field3='block'`；既有组件不传新字段 → 行为不变
+- [x] **自动控制功能开关补齐**（2026-09-16，分支 `feat/auto-switches`）：每个自动控制功能都有独立开关，可逐功能停用
+  - 新增开关（`direct_config`，f_type `1` 单选 关:0|开:1）：`pressure_zero_enabled`(压力归零) / `pump_idle_enabled`(泵空转) / `overpressure_enabled`(过压) / `temp_anomaly_enabled`(温度异常) / `reverse_temp_enabled`(逆温差) / `sensor_offline_enabled`(离线告警) / `device_sync_enabled`(状态同步) / `pump_heat_interlock_enabled`(泵停连带关加热)
+  - **默认值 = 加入开关前的现状行为**：原本一直生效的规则默认**开**，原本默认关闭的能力（状态同步）默认**关**；`flow_unchanged_enabled` / `sensor_spike_enabled` / `flow_target_enabled` / `pid_enabled` 维持原默认
+  - **子配置挂到开关下**（`ref_code` 指向开关 + `ref_value='1'`）：压力归零阈值、瞬时流量归零阈值/空转时长、过压 4 项、温度异常 2 项、逆温差 2 项、离线判定秒数、状态同步帧数；顺带补上历史遗漏的 `flow_unchanged_seconds`
+  - 原有的「0/负值即关闭」语义保留（开关关或值为 0 都停用）；`temp_anomaly_enabled` 关闭时连判定所需历史帧都不再收集
+  - 过压开关关闭时**不再新增锁定**，但已有锁仍按冷却期语义解除（避免关开关后设备被永久锁死）
+  - 升级需执行一次迁移 SQL（seeds 只补行不覆盖旧行），见 `docs/API-CHANGES.md` 升级须知
+  - 用例：`tests/autoControl/autoConfig.test.ts`（开关默认值与优先级）、`tests/autoControl/components.test.ts`（关闭即不判定；共用配置工厂 `tests/autoControl/config.ts`）
 
 ## 锁定通道与复位（`src/core/locks/`、`directModule`）
 

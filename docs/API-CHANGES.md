@@ -193,3 +193,51 @@ UPDATE sensor_data SET field7 = NULL WHERE field7 IN (65535, 6553.5);  -- pressu
   累计续算从 0 开始
 - 本机执行记录（2026-09-14，旧版四列范围）：42 行命中（同一设备，共 83 个单元格）→ 全部置 NULL
   并复扫为 0
+
+### 2026-09-16：自动控制功能开关补齐（新增 8 个开关 + 子项改挂开关）
+
+- **新增 8 个开关配置项**（`f_type='1'`，`关:0|开:1`），前端配置页会自动出现，无需前端改动：
+
+  | code                          | 含义                 | 默认值 | 说明                                           |
+  | ----------------------------- | -------------------- | ------ | ---------------------------------------------- |
+  | `pressure_zero_enabled`       | 压力归零（堵塞保护） | 1      | 关闭后该规则不参与判定                         |
+  | `pump_idle_enabled`           | 水泵空转保护         | 1      | 关闭后流量持续归零也不停泵                     |
+  | `overpressure_enabled`        | 过压保护             | 1      | 关闭后不再新增过压锁定（已有锁仍按冷却期解除） |
+  | `temp_anomaly_enabled`        | 温度异常（堵塞保护） | 1      | 关闭后不再收集判定所需历史帧                   |
+  | `reverse_temp_enabled`        | 逆温差预警           | 1      | 关闭后不告警                                   |
+  | `sensor_offline_enabled`      | 离线告警             | 1      | 关闭后不推离线/恢复告警                        |
+  | `device_sync_enabled`         | 状态同步             | 0      | 关闭后不做「以设备上报为准」回写               |
+  | `pump_heat_interlock_enabled` | 泵停连带关加热       | 1      | 关闭后泵停不再自动关加热（**不建议关**）       |
+
+  默认值口径：**等于加入开关前的现状行为**（原本一直生效的默认开，原本默认关的仍默认关；
+  `flow_unchanged_enabled` / `sensor_spike_enabled` / `flow_target_enabled` / `pid_enabled` 保持原默认）。
+
+- **子配置改挂到各自开关下**（`ref_code` = 开关 code、`ref_value` = `'1'`）：前端按层级门控
+  隐藏「已停用功能」的参数项。迁移（seeds 只补行、不覆盖旧行，故既有库需手工执行一次）：
+
+  ```sql
+  UPDATE direct_config SET ref_code='pressure_zero_enabled', ref_value='1'
+    WHERE code = 'pressure_zero';
+  UPDATE direct_config SET ref_code='pump_idle_enabled', ref_value='1'
+    WHERE code IN ('flow_rate_zero','pump_idle_seconds');
+  UPDATE direct_config SET ref_code='overpressure_enabled', ref_value='1'
+    WHERE code IN ('overpressure_limit','overpressure_delay','overpressure_auto_release','overpressure_on_release');
+  UPDATE direct_config SET ref_code='temp_anomaly_enabled', ref_value='1'
+    WHERE code IN ('temp1_rise_count','temp2_stable_delta');
+  UPDATE direct_config SET ref_code='reverse_temp_enabled', ref_value='1'
+    WHERE code IN ('reverse_temp_delta','reverse_temp_seconds');
+  UPDATE direct_config SET ref_code='sensor_offline_enabled', ref_value='1'
+    WHERE code = 'sensor_offline_seconds';
+  UPDATE direct_config SET ref_code='device_sync_enabled', ref_value='1'
+    WHERE code = 'device_sync_frames';
+  -- 顺带补历史遗漏（seeds 早已改为挂开关，旧库没跟上）
+  UPDATE direct_config SET ref_code='flow_unchanged_enabled', ref_value='1'
+    WHERE code = 'flow_unchanged_seconds';
+  ```
+
+  ⚠️ 顺序：**先启动一次服务**（seeds 自动补上 8 个开关行）再执行上面的 UPDATE，否则子项的父配置尚不存在，
+  配置页会把它们判为不可见。
+
+- 原有的「阈值为 0 即关闭」语义保留（开关关 **或** 值为 0 都停用）；自检同样用
+  `pnpm exec tsx tests/e2e/verify_seeds.ts`（本机 2026-09-16 执行后仅剩 `sensor_data_mapper.p_name`
+  与 `pressure_zero.f_type` 的历史差异，与本次变更无关）。
