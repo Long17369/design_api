@@ -2,38 +2,15 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { pidTempComponent } from '@modules/autoControl/components/pidTemp'
 import { AutoConfig, DeviceState } from '@modules/autoControl'
 import type { WsData } from '@/types/types'
+import { testConfig } from './config'
 
-const CFG: AutoConfig = {
-  pressureZero: 0.01,
-  overpressureLimit: 20,
-  overpressureDelay: 20,
-  overpressureAutoRelease: true,
-  overpressureOnRelease: 'hold',
-  flowRateZero: 0.01,
-  pumpIdleSeconds: 60,
-  pumpStartGrace: 10,
-  flowUnchangedEnabled: true,
-  flowUnchangedSeconds: 15,
-  sensorOfflineSeconds: 60,
-  deviceSyncFrames: 0,
-  temp1RiseCount: 3,
-  temp2StableDelta: 0.5,
-  tempMax: 35,
-  tempMin: 10,
-  tempMaxSensor: 2,
-  tempMinSensor: 2,
-  reverseTempDelta: 2,
-  reverseTempSeconds: 60,
+const CFG: AutoConfig = testConfig({
   flowTargetEnabled: false,
-  totalFlowTarget: 100,
   pidEnabled: true,
-  pidTarget: 30,
-  pidKp: 4,
   pidKi: 0,
   pidKd: 0,
   pidCycle: 10,
-  pidSensor: 2,
-}
+})
 
 const D_NO = 'PID1'
 

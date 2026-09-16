@@ -17,6 +17,7 @@
 | `tests/autoControl/components.test.ts`       | 堵塞三判定（压力归零/流量不变/温度异常）、空转去抖、恒温上下限、流量目标、过压冷却期与锁、逆温差预警                                                             |
 | `tests/autoControl/pidTemp.test.ts`          | PID：未启用/防干烧/缺测/占空比开关/积分限幅饱和/抗积分饱和（升温段不污染稳定段）/时间量纲与 PWM 最小导通                                                         |
 | `tests/autoControl/alarm.test.ts`            | `sendAlarm` 分类/类型/颜色透传、时间归一化（UTC 字面量）、堵塞补推组装                                                                                           |
+| `tests/autoControl/autoConfig.test.ts`       | 阈值配置读取：功能开关默认值（等于加开关前的现状）、`direct` 设备值 > 默认值 > 内置默认、空串回退                                                                |
 | `tests/sensorModule/spike.test.ts`           | 跳变阈值边界、关闭字段、缺测不误判                                                                                                                               |
 | `tests/sensorModule/offline.test.ts`         | 无效上报值剔除（按 `sensor_data_mapper.invalid_value` 配置：温度/压力 6553.5、流量 655.35、开关 65535；字符串/数字形态、未配置字段不动）+ 缺测不污染派生值与落库 |
 | `tests/core/cache.test.ts`                   | KV/TTL/标签失效/`remember` 只加载一次                                                                                                                            |

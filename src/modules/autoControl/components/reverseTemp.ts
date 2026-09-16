@@ -46,7 +46,7 @@ function stateOf(dNo: string): ReverseState {
  * - 状态由组件自持（`since`/`alerted`），恢复正常后自动解除，可再次触发；
  * - 持续时长设为 0 表示关闭该预警。
  *
- * 相关配置：reverse_temp_delta / reverse_temp_seconds
+ * 相关配置：reverse_temp_enabled（开关）/ reverse_temp_delta / reverse_temp_seconds
  */
 export const reverseTempComponent: AutoComponent = {
   id: 'reverse_temp',
@@ -60,8 +60,8 @@ export const reverseTempComponent: AutoComponent = {
     const { cfg, d_no: dNo, values, now } = ctx
     const state = stateOf(dNo)
 
-    // 未启用
-    if (cfg.reverseTempSeconds <= 0) {
+    // 未启用（开关关闭或时长为 0）
+    if (!cfg.reverseTempEnabled || cfg.reverseTempSeconds <= 0) {
       state.since = null
       state.alerted = false
       return null

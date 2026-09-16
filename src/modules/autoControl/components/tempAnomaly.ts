@@ -14,7 +14,7 @@ const ALARM: AlarmDef = {
  * 同时升温2 在这些帧内保持稳定（极差 ≤ temp2_stable_delta）。
  * 命中即执行堵塞保护（关加热 + 关水泵 + 加 blocked 锁（持久化与推送由 LockModule 负责） + 预警）。
  * 告警**仅状态切换时推送**（以 `blocked` 锁为「已推送」标志，复位后可再次推送）。
- * 相关配置：temp1_rise_count / temp2_stable_delta
+ * 相关配置：temp_anomaly_enabled（开关）/ temp1_rise_count / temp2_stable_delta
  */
 export const tempAnomalyComponent: AutoComponent = {
   id: 'temp_anomaly',
@@ -22,9 +22,11 @@ export const tempAnomalyComponent: AutoComponent = {
   priority: 16,
   /** 判定需要「连续上升 N 次」的历史：N + 1 帧 */
   historyLength(ctx: AutoCtx): number {
-    return ctx.cfg.temp1RiseCount + 1
+    return ctx.cfg.tempAnomalyEnabled ? ctx.cfg.temp1RiseCount + 1 : 1
   },
   evaluate(ctx: AutoCtx): AutoDecision | null {
+    // 规则开关（默认开）：关闭时不判定
+    if (!ctx.cfg.tempAnomalyEnabled) return null
     if (!isTempAnomaly(ctx.state, ctx.cfg)) return null
     // 告警边沿：已有 blocked 锁 ⇒ 本设备本次堵塞已推送过
     const firstAlarm = lockManager.get(ctx.d_no, 'blocked') === undefined

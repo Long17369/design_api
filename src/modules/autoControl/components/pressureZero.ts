@@ -15,13 +15,15 @@ const ALARM: AlarmDef = {
  *
  * 告警**仅状态切换时推送**：`blocked` 锁即「已推送」标志（锁已存在则只继续维持堵塞态、不重复告警），
  * 手动复位释放锁后若再次命中，会重新推送。
- * 相关配置：pressure_zero（压力归零阈值）
+ * 相关配置：pressure_zero_enabled（开关）/ pressure_zero（压力归零阈值）
  */
 export const pressureZeroComponent: AutoComponent = {
   id: 'pressure_zero',
   name: '压力归零（堵塞保护）',
   priority: 10,
   evaluate(ctx: AutoCtx): AutoDecision | null {
+    // 规则开关（默认开）：关闭时不判定
+    if (!ctx.cfg.pressureZeroEnabled) return null
     const pressure = toNum(ctx.data.pressure)
     if (pressure === null || pressure >= ctx.cfg.pressureZero) return null
     // 告警边沿：已有 blocked 锁 ⇒ 本设备本次堵塞已推送过
