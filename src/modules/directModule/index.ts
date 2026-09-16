@@ -7,7 +7,7 @@ import { lockManager } from '@core/locks'
 import { formatNow } from '@core/utils'
 import { sendAlarm } from '@modules/alarmModule/utils'
 import { AlarmSpec } from '@modules/alarmModule'
-import { Direct, DirectConfig, WsAlarm, WsDirectUpdate } from '@/types/types'
+import { Direct, DirectConfig, WsDirectUpdate } from '@/types/types'
 import { ControlParams, DirectConfigRow, DirectModuleConfig, SetValueParams } from '.'
 import { DeviceSync, buildControlMessage, reportedState } from './dispatch'
 import {
@@ -38,6 +38,15 @@ const SYNC_ALARM: AlarmSpec = {
 
 /** 设备状态同步的内置默认（与 `config.schema.json` 的 `direct.device_sync` 默认值一致） */
 const DEFAULT_DEVICE_SYNC: DirectModuleConfig['device_sync'] = { enabled: false, frames: 0 }
+
+/** 手动复位堵塞告警（`type='reset'` 供前端清横幅；`category='release'` 不参与堵塞预警补推） */
+const RESET_ALARM: AlarmSpec = {
+  code: 'block_release',
+  level: 'warning',
+  message: '堵塞已复位（手动）',
+  category: 'release',
+  type: 'reset',
+}
 
 /**
  * Direct（指令配置）中间模块：
@@ -332,25 +341,8 @@ export class DirectModule implements Closable {
     }
     lockManager.clearSnapshot(d_no)
 
-    // 3. 解除告警：写 error_msg（category=release，不参与堵塞预警补推）+ 广播 reset 事件（前端清横幅）
-    const cTime = formatNow()
-    await db.insert('error_msg', {
-      d_no,
-      c_time: cTime,
-      field1: '堵塞已复位（手动）',
-      field2: 'block_release',
-      field3: 'release',
-    })
-    const data: WsAlarm = {
-      id: `reset_${d_no}_${cTime}`,
-      d_no,
-      type: 'reset',
-      message: '堵塞已复位',
-      code: 'block_release',
-      level: 'warning',
-      timestamp: cTime,
-    }
-    bus.emitEvent('WS_MESSAGE_OUT', { message: { event: 'alarm', data } })
+    // 3. 解除告警：走统一告警入口（category=release 不参与堵塞预警补推；type=reset 供前端清横幅）
+    await sendAlarm(db, d_no, RESET_ALARM, '手动复位堵塞状态')
     logger.info(`手动复位堵塞状态: ${d_no}`)
   }
 }

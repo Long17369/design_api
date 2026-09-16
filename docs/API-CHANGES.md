@@ -361,3 +361,14 @@ UPDATE sensor_data SET field7 = NULL WHERE field7 IN (65535, 6553.5);  -- pressu
   ```
 
   本机 2026-09-16 已按此顺序执行，`verify_seeds` 通过（仅剩 5 处既有漂移）。
+
+### 2026-09-16：手动复位告警改走统一告警入口（WS 消息 id / 文案微调）
+
+- 后端内部收敛：`DirectModule.resetBlock()` 原先自己拼 `error_msg` 行 + 手搓 WS `alarm` 事件，
+  现统一走 `@modules/alarmModule/utils::sendAlarm`（告警写入唯一入口）。
+- **前端可见的两点差异**：
+  1. WS `alarm` 事件的 `id` 前缀由 `reset_<d_no>_<时间>` 变为 `alarm_<d_no>_<时间>`
+     （仍是「设备号 + 落库时间」唯一，前端按 id 去重不受影响）；
+  2. `message` 由「堵塞已复位」变为「堵塞已复位（手动）」（与 `error_msg.field1` 同源）。
+- 其余不变：`type='reset'`（前端据此清横幅）、`code='block_release'`、`level='warning'`、
+  `error_msg.field3='release'`（不参与堵塞预警补推）。
