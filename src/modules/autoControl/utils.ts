@@ -3,7 +3,13 @@ import { Database } from '@core/database'
 import { formatNow } from '@core/utils'
 import { DirectModule } from '@modules/directModule'
 import { WsData } from '@/types/types'
-import { AutoConfig, ControlTarget, DeviceState, TempControlMode } from '@modules/autoControl'
+import {
+  AutoConfig,
+  ControlTarget,
+  DeviceState,
+  DryBurnTempSensor,
+  TempControlMode,
+} from '@modules/autoControl'
 
 const logger = log.getLogger('AutoControlUtils')
 
@@ -23,6 +29,16 @@ function readTempControlMode(pick: (code: string) => string | null): TempControl
     logger.warn(`未知的温控方式: ${value}，按简易恒温处理`)
   }
   return pick('pid_enabled') === '1' ? 'pid' : 'simple'
+}
+
+/** 读取干烧监听的温度信号（`dry_burn_temp_sensor`）：非法/缺失 → 出水温度（历史行为） */
+function readDryBurnTempSensor(pick: (code: string) => string | null): DryBurnTempSensor {
+  const value = pick('dry_burn_temp_sensor')
+  if (value === 'out' || value === 'in') return value
+  if (value !== null && value !== '') {
+    logger.warn(`未知的干烧温度信号: ${value}，按出水温度处理`)
+  }
+  return 'out'
 }
 
 /** 数值化；非法返回 null */
@@ -76,10 +92,9 @@ export function buildAutoConfig(
     pumpIdleSeconds: numOr('pump_idle_seconds', 60),
     pumpStartGrace: numOr('pump_start_grace', 10),
     pumpHeatInterlockEnabled: boolOr('pump_heat_interlock_enabled', true),
-    heatRateWindow: numOr('heat_rate_window', 60),
     dryBurnEnabled: boolOr('dry_burn_enabled', true),
     dryBurnSeconds: numOr('dry_burn_seconds', 15),
-    dryBurnHeatRate: numOr('dry_burn_heat_rate', 0.4),
+    dryBurnTempSensor: readDryBurnTempSensor(pick),
     flowUnchangedEnabled: boolOr('flow_unchanged_enabled', true),
     flowUnchangedSeconds: numOr('flow_unchanged_seconds', 15),
     tempAnomalyEnabled: boolOr('temp_anomaly_enabled', true),
