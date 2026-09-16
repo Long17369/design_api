@@ -1,5 +1,11 @@
 import { MQTTMessageOut } from '@/types/types'
-import { ControlCommandGroup, DeviceSyncState, ModbusCommand } from '.'
+import {
+  ControlCommandGroup,
+  DeviceSyncState,
+  DeviceSyncTrigger,
+  DeviceSyncValues,
+  ModbusCommand,
+} from '.'
 
 /**
  * ============ 设备端「指令下发」目标接口定义（唯一改动点）============
@@ -51,18 +57,16 @@ export function buildControlMessage(config_id: string, value: string): MQTTMessa
 }
 
 /**
- * ============ 设备状态同步（在「下发前」对账）============
+ * ============ 设备状态同步（按上报帧对账）============
  *
- * 语义（原 autoControl 引擎里的 `syncWithDevice`，2026-09-16 搬到下发这一步）：
- * 设备上报的开关状态与 `direct` 指令值**连续 N 帧不一致**时，**以设备实际状态为准**
- * —— 但在本模块里不再"另发一条指令"，而是在**下发前**把待下发的值改成设备实际状态，
- * 由正常的写库/下发链路带出去（因此不存在"没指令要发就不对账"的问题：指令值一旦变化
- * 就会重新计数并把设备状态带过来）。
+ * 语义：设备上报的开关状态与 `direct` 指令值**连续 N 帧不一致**时，**以设备实际状态为准**
+ * 回写指令（写库 + 下发 + `source='device'` 通知 + 控制记录 + 告警）。
  *
- * 计数由**设备上报**驱动（每帧一次），对账动作发生在**下发前**：
- * - 指令值变化 → 重新计数（等设备上报跟上，避免刚下发的控制被设备滞后上报同步回去）；
+ * 计数由**设备上报**驱动（每帧一次，与是否有指令下发无关）：
+ * - 指令值刚变化的那一帧只重新计数、不触发 —— 留一帧给设备执行新指令，
+ *   避免刚下发的控制被设备滞后上报立刻同步回去；
  * - 上报或指令缺测 → 计数清零（数据不足不判定）；
- * - 开关关闭（`direct.device_sync.enabled=false`）→ 完全不判定。
+ * - 开关关闭（`direct.device_sync.enabled=false`）或 `frames ≤ 0` → 完全不判定。
  */
 
 /** 归一化上报的开关状态：'1'/true → '1'，'0'/false → '0'，缺失/空 → undefined */
@@ -71,6 +75,9 @@ export function reportedState(value: string | boolean | undefined | null): strin
   if (typeof value === 'boolean') return value ? '1' : '0'
   return value === '1' ? '1' : '0'
 }
+
+/** 参与对账的控制目标（同时是指令配置码） */
+const SYNC_TARGETS = ['heat', 'water'] as const
 
 /** 设备状态同步（每个 DirectModule 实例一份；状态按设备号自持） */
 export class DeviceSync {
@@ -81,71 +88,51 @@ export class DeviceSync {
     let state = this.states.get(dNo)
     if (!state) {
       state = {
-        heat: { instructed: undefined, reported: undefined, count: 0 },
-        water: { instructed: undefined, reported: undefined, count: 0 },
+        heat: { seen: undefined, count: 0 },
+        water: { seen: undefined, count: 0 },
       }
       this.states.set(dNo, state)
     }
     return state
   }
 
-  /** 记录一次「本模块写下的指令值」（由写库入口调用，避免每帧查库）；指令值变化即重新计数 */
-  public noteInstructed(dNo: string, config_id: string, value: string): void {
-    if (config_id !== 'heat' && config_id !== 'water') return
-    const item = this.stateOf(dNo)[config_id]
-    if (item.instructed !== undefined && item.instructed !== value) item.count = 0
-    item.instructed = value
-  }
-
   /**
-   * 记一帧设备上报：更新「指令 vs 上报」的连续不一致帧数。
-   * @param reported 本帧上报的 heat/water（缺测传 undefined）
-   * @returns 本次更新后各目标的连续不一致帧数（供日志/测试）
+   * 对账一帧：比较本帧的「指令值 vs 设备上报值」，累计连续不一致帧数。
+   * @param instructed 本帧库中的开关类指令值（缺测为 undefined）
+   * @param reported 本帧设备上报的开关状态（缺测为 undefined）
+   * @param frames 连续不一致帧数阈值（`device_sync.frames`）
+   * @returns 本帧达到阈值、需要以设备为准回写的目标（无则空数组）
    */
-  public onReport(
+  public evaluate(
     dNo: string,
-    reported: { heat: string | undefined; water: string | undefined },
-  ): DeviceSyncState {
+    instructed: DeviceSyncValues,
+    reported: DeviceSyncValues,
+    frames: number,
+  ): DeviceSyncTrigger[] {
     const state = this.stateOf(dNo)
-    for (const target of ['heat', 'water'] as const) {
+    const triggered: DeviceSyncTrigger[] = []
+    for (const target of SYNC_TARGETS) {
       const item = state[target]
+      const want = instructed[target]
       const actual = reported[target]
-      const instructed = item.instructed
-      item.reported = actual
-      // 指令或上报缺测 → 不判定
-      if (instructed === undefined || actual === undefined) {
+      // 指令或上报缺测、两者一致：不判定（只记住本帧指令值）
+      if (want === undefined || actual === undefined || want === actual) {
+        item.seen = want
         item.count = 0
         continue
       }
-      if (instructed === actual) {
-        item.count = 0
+      // 指令值刚变化：本帧只重新计数，给设备一帧执行新指令的时间
+      if (item.seen !== want) {
+        item.seen = want
+        item.count = 1
         continue
       }
       item.count += 1
+      if (frames <= 0 || item.count < frames) continue
+      item.count = 0
+      triggered.push({ target, instructed: want, value: actual })
     }
-    return state
-  }
-
-  /**
-   * 下发前对账：若该目标「连续不一致帧数 ≥ frames」⇒ 以设备实际状态为准，返回要下发的值。
-   * @param dNo 设备号
-   * @param config_id 指令配置码
-   * @param requested 本次请求下发的值
-   * @param frames 连续不一致帧数阈值（`device_sync.frames`；≤0 表示不判定）
-   * @returns 覆盖后的值（以设备为准）或 undefined（不对账，按请求值下发）
-   */
-  public overrideValue(
-    dNo: string,
-    config_id: string,
-    requested: string,
-    frames: number,
-  ): string | undefined {
-    if (frames <= 0) return undefined
-    if (config_id !== 'heat' && config_id !== 'water') return undefined
-    const item = this.stateOf(dNo)[config_id]
-    if (item.reported === undefined || item.reported === requested) return undefined
-    if (item.count < frames) return undefined
-    return item.reported
+    return triggered
   }
 
   /** 清理状态（close 用；不传设备号则全清） */

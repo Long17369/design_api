@@ -22,17 +22,29 @@ declare module '@modules/directModule' {
   }
   /** 设备状态同步：单个控制目标的追踪状态 */
   interface TargetSync {
-    /** 上一次已知的指令值（undefined 表示未知） */
-    instructed: string | undefined
-    /** 最近一次上报的状态（undefined 表示未上报/缺测） */
-    reported: string | undefined
+    /** 上一次对账时的指令值（undefined 表示尚未对过账） */
+    seen: string | undefined
     /** 连续不一致帧数 */
     count: number
   }
-  /** 设备状态同步：单设备状态（按设备自持；计数由上报驱动，对账在下发前） */
+  /** 设备状态同步：单设备状态（按设备自持；计数由上报驱动） */
   interface DeviceSyncState {
     heat: TargetSync
     water: TargetSync
+  }
+  /** 设备状态同步：开关类指令值 / 设备上报值（键 = 控制对象，缺测不写该键） */
+  interface DeviceSyncValues {
+    heat?: string | undefined
+    water?: string | undefined
+  }
+  /** 设备状态同步：本帧达到阈值、需要以设备实际状态回写的目标 */
+  interface DeviceSyncTrigger {
+    /** 控制对象（同时是指令配置码） */
+    target: 'heat' | 'water'
+    /** 本帧库中的指令值 */
+    instructed: string
+    /** 设备上报的实际值 */
+    value: string
   }
   /** 手动控制参数（HTTP POST /api/control） */
   interface ControlParams {
@@ -71,7 +83,7 @@ declare module '@modules/directModule' {
 
   /**
    * 本模块的配置节（`config.json` 的 `direct`）。
-   * 设备状态同步（上报 vs 指令连续 N 帧不一致 ⇒ 以设备为准）属于"下发前对账"，
+   * 设备状态同步（上报 vs 指令连续 N 帧不一致 ⇒ 以设备为准）按**上报帧**对账，
    * 开关与帧数放配置文件（不进指令配置页）。
    */
   interface DirectModuleConfig {
