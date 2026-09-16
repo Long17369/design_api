@@ -4,9 +4,33 @@ import { Database } from '@core/database'
 import { formatNow } from '@core/utils'
 import { DirectModule } from '@modules/directModule'
 import { WsAlarm, WsData } from '@/types/types'
-import { AlarmDef, AutoConfig, ControlTarget, DeviceState } from '@modules/autoControl'
+import {
+  AlarmDef,
+  AutoConfig,
+  ControlTarget,
+  DeviceState,
+  TempControlMode,
+} from '@modules/autoControl'
 
 const logger = log.getLogger('AutoControlUtils')
+
+/** 温控方式取值集合（配置异常时回退默认） */
+const TEMP_CONTROL_MODES: readonly TempControlMode[] = ['simple', 'pid', 'off']
+
+/**
+ * 读取温控方式（`temp_control_mode`）：非法/缺失 → `'simple'`（上下限恒温 = 历史行为）。
+ * 兼容尚未迁移的 `pid_enabled=1`（老配置）：等价于 `'pid'`。
+ */
+function readTempControlMode(pick: (code: string) => string | null): TempControlMode {
+  const value = pick('temp_control_mode')
+  if (value !== null && TEMP_CONTROL_MODES.includes(value as TempControlMode)) {
+    return value as TempControlMode
+  }
+  if (value !== null && value !== '') {
+    logger.warn(`未知的温控方式: ${value}，按简易恒温处理`)
+  }
+  return pick('pid_enabled') === '1' ? 'pid' : 'simple'
+}
 
 /** 数值化；非法返回 null */
 export function toNum(value: string | number | null | undefined): number | null {
@@ -77,7 +101,7 @@ export function buildAutoConfig(
     reverseTempSeconds: numOr('reverse_temp_seconds', 60),
     flowTargetEnabled: pick('flow_target_enabled') === '1',
     totalFlowTarget: numOr('total_flow_target', 100),
-    pidEnabled: pick('pid_enabled') === '1',
+    tempControlMode: readTempControlMode(pick),
     pidTarget: numOr('pid_target', 30),
     pidKp: numOr('pid_kp', 4),
     pidKi: numOr('pid_ki', 0.02),

@@ -7,6 +7,9 @@ declare module '@modules/autoControl' {
   /** 控制目标 */
   type ControlTarget = 'heat' | 'water'
 
+  /** 温控方式：简易（上下限）/ PID / 关（均不输出温控动作，仅保留超温安全上限） */
+  type TempControlMode = 'simple' | 'pid' | 'off'
+
   /** 单条控制动作 */
   interface ControlAction {
     target: ControlTarget
@@ -111,8 +114,8 @@ declare module '@modules/autoControl' {
     flowTargetEnabled: boolean
     /** 累计流量目标(L)：达到即关水泵（连带关加热） */
     totalFlowTarget: number
-    /** PID 控温是否启用 */
-    pidEnabled: boolean
+    /** 温控方式：'simple' 简易恒温（上下限开关式）/ 'pid' PID 控温 / 'off' 不做温控 */
+    tempControlMode: TempControlMode
     /** PID 目标温度(°C) */
     pidTarget: number
     /** PID 比例系数（每 °C 占空比） */

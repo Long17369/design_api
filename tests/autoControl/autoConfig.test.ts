@@ -27,7 +27,10 @@ describe('buildAutoConfig：功能开关默认值', () => {
   it('原本默认关闭的能力默认关', () => {
     expect(cfg.deviceSyncEnabled).toBe(false)
     expect(cfg.flowTargetEnabled).toBe(false)
-    expect(cfg.pidEnabled).toBe(false)
+  })
+
+  it('温控方式默认简易（= 加入温控选择前的上下限恒温行为）', () => {
+    expect(cfg.tempControlMode).toBe('simple')
   })
 
   it('默认值同时保留原有的数值/时长语义', () => {
@@ -61,5 +64,26 @@ describe('buildAutoConfig：开关取值与优先级', () => {
       defaultsOf({ temp_anomaly_enabled: '' }),
     )
     expect(cfg.tempAnomalyEnabled).toBe(false)
+  })
+})
+
+describe('buildAutoConfig：温控方式解析', () => {
+  it('off / pid 原样返回', () => {
+    expect(buildAutoConfig(defaultsOf({ temp_control_mode: 'off' })).tempControlMode).toBe('off')
+    expect(buildAutoConfig(defaultsOf({ temp_control_mode: 'pid' })).tempControlMode).toBe('pid')
+  })
+
+  it('非法值 → 回退简易（历史行为）', () => {
+    expect(buildAutoConfig(defaultsOf({ temp_control_mode: 'PID' })).tempControlMode).toBe('simple')
+    expect(buildAutoConfig(defaultsOf({ temp_control_mode: 'x' })).tempControlMode).toBe('simple')
+  })
+
+  it('兼容未迁移的 pid_enabled=1 → 视为 pid', () => {
+    expect(buildAutoConfig(defaultsOf({ pid_enabled: '1' })).tempControlMode).toBe('pid')
+  })
+
+  it('temp_control_mode 存在时以其为准（优先于 pid_enabled）', () => {
+    const cfg = buildAutoConfig(defaultsOf({ temp_control_mode: 'simple', pid_enabled: '1' }))
+    expect(cfg.tempControlMode).toBe('simple')
   })
 })

@@ -36,7 +36,7 @@ export function testConfig(overrides: Partial<AutoConfig> = {}): AutoConfig {
     reverseTempSeconds: 60,
     flowTargetEnabled: true,
     totalFlowTarget: 100,
-    pidEnabled: false,
+    tempControlMode: 'simple',
     pidTarget: 30,
     pidKp: 4,
     pidKi: 0.02,

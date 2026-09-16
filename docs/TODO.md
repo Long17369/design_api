@@ -148,6 +148,13 @@
   - 过压开关关闭时**不再新增锁定**，但已有锁仍按冷却期语义解除（避免关开关后设备被永久锁死）
   - 升级需执行一次迁移 SQL（seeds 只补行不覆盖旧行），见 `docs/API-CHANGES.md` 升级须知
   - 用例：`tests/autoControl/autoConfig.test.ts`（开关默认值与优先级）、`tests/autoControl/components.test.ts`（关闭即不判定；共用配置工厂 `tests/autoControl/config.ts`）
+- [x] **温控选择取代 PID 开关**（2026-09-16，分支 `feat/temp-control-mode`）：`pid_enabled`（关/开）→ **`temp_control_mode` 单选**（`关:off` / `简易:simple` / `PID:pid`，默认 `simple`）
+  - **简易** = 原恒温上下限（`tempLimit` 的下限开加热 + 上限关加热）；**PID** = 原 `pidTemp` 完整 PID + PWM；**关** = 不做温控
+  - **两种温控互斥**：选 `PID` 时简易温控（上下限）**完全不参与**（上限与下限都不动），选 `简易` 时 PID 不参与 —— 二者都是会抢加热的控制器，必须只有一个在管；`关` 则都不做温控
+  - 层级：`pid_*` 挂 `temp_control_mode`=`pid`；`temp_max`/`temp_min`/`temp_max_sensor`/`temp_min_sensor` 均挂 `simple`（只有简易模式才用得上）
+  - `buildAutoConfig` 对未知值回退 `simple` 并 warn；兼容未迁移的 `pid_enabled=1`（视为 `pid`）
+  - ⚠️ 升级需执行迁移 SQL（新行由 seeds 补，**子项改挂必须在删父行之前** —— `ref_code` 自引用 FK 会拦住删除），见 `docs/API-CHANGES.md` 升级须知
+  - 本机已执行：设备级 `pid_enabled=1` 已转为该设备 `temp_control_mode=pid`（1 行）；`verify_seeds` 仅剩历史差异
 
 ## 锁定通道与复位（`src/core/locks/`、`directModule`）
 
