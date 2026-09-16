@@ -135,8 +135,8 @@ export const pidTempComponent: AutoComponent = {
     const { cfg, d_no: dNo, values, now } = ctx
     const state = stateOf(dNo)
 
-    // 未启用 → 重置并退出
-    if (!cfg.pidEnabled || cfg.pidCycle <= 0) {
+    // 温控方式不是 PID → 重置并退出
+    if (cfg.tempControlMode !== 'pid' || cfg.pidCycle <= 0) {
       reset(state)
       return null
     }

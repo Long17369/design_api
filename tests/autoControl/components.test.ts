@@ -336,6 +336,49 @@ describe('恒温保护 tempLimit', () => {
   })
 })
 
+describe('温控选择 temp_control_mode（简易 / PID / 关，互斥）', () => {
+  it('简易：上下限都生效（低于下限开加热、超上限关加热）', () => {
+    const cfg = { ...CFG, tempControlMode: 'simple' as const }
+    expect(
+      tempLimitComponent.evaluate(ctx({ wen_du2: '5' }, { cfg, values: { heat: '0', water: '1' } }))
+        ?.controls,
+    ).toEqual([{ target: 'heat', value: '1' }])
+    expect(
+      tempLimitComponent.evaluate(
+        ctx({ wen_du2: '40' }, { cfg, values: { heat: '1', water: '1' } }),
+      )?.controls,
+    ).toEqual([{ target: 'heat', value: '0' }])
+  })
+
+  it('PID：简易温控完全不参与（超上限也不插手，避免两套温控抢加热）', () => {
+    const cfg = { ...CFG, tempControlMode: 'pid' as const }
+    expect(
+      tempLimitComponent.evaluate(
+        ctx({ wen_du2: '5' }, { cfg, values: { heat: '0', water: '1' } }),
+      ),
+    ).toBeNull()
+    expect(
+      tempLimitComponent.evaluate(
+        ctx({ wen_du2: '40' }, { cfg, values: { heat: '1', water: '1' } }),
+      ),
+    ).toBeNull()
+  })
+
+  it('关：简易温控同样完全不参与（不做温控）', () => {
+    const cfg = { ...CFG, tempControlMode: 'off' as const }
+    expect(
+      tempLimitComponent.evaluate(
+        ctx({ wen_du2: '5' }, { cfg, values: { heat: '0', water: '1' } }),
+      ),
+    ).toBeNull()
+    expect(
+      tempLimitComponent.evaluate(
+        ctx({ wen_du2: '40' }, { cfg, values: { heat: '1', water: '1' } }),
+      ),
+    ).toBeNull()
+  })
+})
+
 describe('累计流量目标 flowTarget', () => {
   it('跨越目标关泵一次，目标调大后可再次触发', () => {
     const dNo = 'T1'

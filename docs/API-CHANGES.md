@@ -241,3 +241,45 @@ UPDATE sensor_data SET field7 = NULL WHERE field7 IN (65535, 6553.5);  -- pressu
 - 原有的「阈值为 0 即关闭」语义保留（开关关 **或** 值为 0 都停用）；自检同样用
   `pnpm exec tsx tests/e2e/verify_seeds.ts`（本机 2026-09-16 执行后仅剩 `sensor_data_mapper.p_name`
   与 `pressure_zero.f_type` 的历史差异，与本次变更无关）。
+
+### 2026-09-16：PID 开关 → 温控方式单选（`temp_control_mode`）
+
+- **配置页变化（前端无需改代码）**：原「PID 控温开关」（`pid_enabled`，`关:0|开:1`）被替换为
+  「**温控方式**」单选 `temp_control_mode`：`关:off` / `简易:simple` / `PID:pid`，默认 `simple`。
+  - **简易** = 原来的恒温上下限（低于 `temp_min` 且水泵运行 → 开加热；到 `temp_max` → 关加热）
+  - **PID** = 原 PID 控温（完整 PID + PWM 开关加热）
+  - **关** = 不做温控（仅保留超温安全上限，见下）
+- **两种温控互斥**：选 `PID` 时简易温控（上下限）**完全不参与**（上限与下限都不动，PID 独占加热控制）；
+  选 `简易` 时 PID 不参与；`关` 则都不做温控（加热仍受堵塞/过压/干烧/泵热联动等**保护**约束，但无人自动开加热）。
+- 层级：子项按温控方式显示 —— `pid_*`（PID 参数）挂在 `PID`；`temp_max`/`temp_min`/`temp_max_sensor`/`temp_min_sensor`
+  均挂在 `简易`（只有简易模式用得上）。
+- 迁移（**顺序不能变**：`ref_code` 有自引用 FK，先改挂子项再删旧行；新行由 seeds 在服务启动时补）：
+
+  ```sql
+  -- 1) 先把设备级旧开关值迁成温控方式（已存在则不重复插）
+  INSERT INTO direct (config_id, value, d_no)
+  SELECT 'temp_control_mode', CASE WHEN d.value = '1' THEN 'pid' ELSE 'simple' END, d.d_no
+    FROM direct d
+   WHERE d.config_id = 'pid_enabled'
+     AND NOT EXISTS (
+       SELECT 1 FROM (SELECT * FROM direct) x
+        WHERE x.config_id = 'temp_control_mode' AND x.d_no = d.d_no
+     );
+
+  -- 2) 子项改挂到温控方式
+  UPDATE direct_config SET ref_code='temp_control_mode', ref_value='pid'
+    WHERE code IN ('pid_target','pid_kp','pid_ki','pid_kd','pid_cycle','pid_sensor');
+  UPDATE direct_config SET ref_code='temp_control_mode', ref_value='simple'
+    WHERE code IN ('temp_max','temp_max_sensor');
+  UPDATE direct_config SET ref_code='temp_control_mode', ref_value='simple'
+    WHERE code IN ('temp_min','temp_min_sensor');
+
+  -- 3) 删除旧开关（先删 direct 依赖行，否则外键拦住 direct_config）
+  DELETE FROM direct WHERE config_id = 'pid_enabled';
+  DELETE FROM direct_config WHERE code = 'pid_enabled';
+  ```
+
+  ⚠️ 若只删 `direct_config` 会报 `fk_direct_config_ref_code`（子项仍指向它）或 `direct` 外键错误 ——
+  必须先跑第 2 步（子项改挂）；本机 2026-09-16 已按此顺序执行，`verify_seeds` 通过。
+- 兼容：引擎侧读到未知 `temp_control_mode` 值会回退 `simple` 并打 warn；未迁移的库若仍有
+  `pid_enabled=1`，等价按 `pid` 处理（迁移完成前不会静默降级）。

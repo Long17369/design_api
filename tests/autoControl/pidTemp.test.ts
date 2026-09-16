@@ -6,7 +6,7 @@ import { testConfig } from './config'
 
 const CFG: AutoConfig = testConfig({
   flowTargetEnabled: false,
-  pidEnabled: true,
+  tempControlMode: 'pid',
   pidKi: 0,
   pidKd: 0,
   pidCycle: 10,
@@ -56,7 +56,7 @@ describe('PID 控温（PWM）', () => {
   it('未启用时不动作', () => {
     expect(
       pidTempComponent.evaluate(
-        ctx('20', 1000, { heat: '0', water: '1' }, { ...CFG, pidEnabled: false }),
+        ctx('20', 1000, { heat: '0', water: '1' }, { ...CFG, tempControlMode: 'off' }),
       ),
     ).toBeNull()
   })
