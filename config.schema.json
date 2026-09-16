@@ -17,6 +17,10 @@
         "offline": {
           "enabled": true,
           "seconds": 60
+        },
+        "derive": {
+          "source": "database",
+          "max_gap_seconds": 60
         }
       },
       "properties": {
@@ -33,6 +37,23 @@
               "type": "integer",
               "default": 60,
               "description": "超过该时长未上报即告警(秒)"
+            }
+          }
+        },
+        "derive": {
+          "type": "object",
+          "description": "派生指标（加热速度 / 平均水流 / 流量总计）的计算来源",
+          "properties": {
+            "source": {
+              "type": "string",
+              "enum": ["database", "memory"],
+              "default": "database",
+              "description": "database=按 sensor_data 落库帧计算；memory=按进程内滑窗与累加计算"
+            },
+            "max_gap_seconds": {
+              "type": "integer",
+              "default": 60,
+              "description": "database 口径：相邻落库帧间隔超过该秒数则不计入流量积分（防停机/离线后凭空累加）"
             }
           }
         }

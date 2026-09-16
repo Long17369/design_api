@@ -1,5 +1,5 @@
 import { log } from '@core/logger'
-import { CliCommandDef, CliHost } from '.'
+import { CliHost, ResolvedCommand } from '.'
 import { Screen } from './screen'
 import { helpText, resolveCommand } from './utils'
 
@@ -91,8 +91,8 @@ export class Cli {
 
   /** 执行一行输入（`Screen` 回调与测试共用入口） */
   public async run(line: string): Promise<void> {
-    const command = resolveCommand(line)
-    if (!command) {
+    const resolved = resolveCommand(line)
+    if (!resolved) {
       if (line.trim() !== '') {
         this.writeLine(`未知命令：${line.trim()}（输入 h 查看帮助）`)
       }
@@ -100,15 +100,16 @@ export class Cli {
     }
 
     try {
-      await this.execute(command)
+      await this.execute(resolved)
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
-      this.writeLine(`命令 ${command.name} 执行失败：${message}`, true)
+      this.writeLine(`命令 ${resolved.command.name} 执行失败：${message}`, true)
     }
   }
 
   /** 命令实现（清单与说明见 `utils::COMMANDS`） */
-  private async execute(command: CliCommandDef): Promise<void> {
+  private async execute(resolved: ResolvedCommand): Promise<void> {
+    const { command, args } = resolved
     switch (command.name) {
       case 'reload': {
         const result = await this.host.reload()
@@ -144,6 +145,21 @@ export class Cli {
         this.clearScreen()
         return
       }
+      case 'flow': {
+        const dNo = args[0]
+        if (dNo === undefined) {
+          this.writeLine('用法：flow <设备编号>（清零所有设备用 flowall）')
+          return
+        }
+        const result = await this.host.resetFlow(dNo)
+        this.writeLine(this.flowText(result.devices))
+        return
+      }
+      case 'flowall': {
+        const result = await this.host.resetFlow()
+        this.writeLine(this.flowText(result.devices))
+        return
+      }
       case 'restart': {
         this.writeLine('正在重启服务（进程内重建）...')
         await this.host.restart()
@@ -169,6 +185,12 @@ export class Cli {
   private statusText(): string {
     const http = this.host.endpoints().find((item) => item.name === 'HTTP')?.url
     return `${http ?? '服务未启动'}   h=帮助 r=热更新 u=地址 c=清屏 q=退出`
+  }
+
+  /** 清零结果的输出文本（无匹配设备时说明一下，避免看起来像没执行） */
+  private flowText(devices: string[]): string {
+    if (devices.length === 0) return '累计流量已清零：没有匹配的设备（无内存累计态且无落库数据）'
+    return `累计流量已清零（${devices.length} 台）：${devices.join(', ')}`
   }
 
   /** 清空日志区 */

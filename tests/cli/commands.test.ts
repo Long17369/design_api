@@ -24,8 +24,9 @@ function makeHost(result: ReloadResult = EMPTY_RESULT) {
   const restart = vi.fn(async () => undefined)
   const stop = vi.fn()
   const endpoints = vi.fn(() => ENDPOINTS)
-  const host = { reload, restart, stop, endpoints } as unknown as CliHost
-  return { host, reload, restart, stop, endpoints }
+  const resetFlow = vi.fn(async () => ({ devices: ['DEV1'] }))
+  const host = { reload, restart, stop, endpoints, resetFlow } as unknown as CliHost
+  return { host, reload, restart, stop, endpoints, resetFlow }
 }
 
 /** 收集 console.log 输出 */
@@ -47,20 +48,22 @@ describe('命令清单与解析（resolveCommand）', () => {
       ['r', 'reload'],
       ['u', 'urls'],
       ['c', 'clear'],
+      ['f', 'flow'],
+      ['fa', 'flowall'],
       ['q', 'quit'],
       ['h', 'help'],
     ]
     for (const [short, name] of pairs) {
-      expect(resolveCommand(short)?.name).toBe(name)
-      expect(resolveCommand(name)?.name).toBe(name)
-      expect(resolveCommand(name.toUpperCase())?.name).toBe(name)
-      expect(resolveCommand(`  ${short}  `)?.name).toBe(name)
+      expect(resolveCommand(short)?.command.name).toBe(name)
+      expect(resolveCommand(name)?.command.name).toBe(name)
+      expect(resolveCommand(name.toUpperCase())?.command.name).toBe(name)
+      expect(resolveCommand(`  ${short}  `)?.command.name).toBe(name)
     }
   })
 
   it('restart 只有全名（没有短名）', () => {
-    expect(resolveCommand('restart')?.name).toBe('restart')
-    expect(resolveCommand('restart')?.short).toBeNull()
+    expect(resolveCommand('restart')?.command.name).toBe('restart')
+    expect(resolveCommand('restart')?.command.short).toBeNull()
     expect(resolveCommand('re')).toBeUndefined()
   })
 
@@ -71,11 +74,22 @@ describe('命令清单与解析（resolveCommand）', () => {
     expect(resolveCommand('quit now')).toBeUndefined()
   })
 
-  it('清单覆盖约定的 6 条命令', () => {
+  it('flow 接受一个参数（设备编号），其余命令不接受参数', () => {
+    expect(resolveCommand('flow')?.args).toEqual([])
+    expect(resolveCommand('flow DEV1')?.args).toEqual(['DEV1'])
+    expect(resolveCommand('  f   DEV1  ')?.args).toEqual(['DEV1'])
+    expect(resolveCommand('flow DEV1 DEV2')).toBeUndefined()
+    expect(resolveCommand('flowall DEV1')).toBeUndefined()
+    expect(resolveCommand('reload now')).toBeUndefined()
+  })
+
+  it('清单覆盖约定的 8 条命令', () => {
     expect(COMMANDS.map((item) => item.name)).toEqual([
       'reload',
       'urls',
       'clear',
+      'flow',
+      'flowall',
       'quit',
       'restart',
       'help',
@@ -84,10 +98,10 @@ describe('命令清单与解析（resolveCommand）', () => {
 
   it('帮助文本含全部命令与启动帮助', () => {
     const text = helpText()
-    for (const name of ['reload', 'urls', 'clear', 'quit', 'restart', 'help']) {
+    for (const name of ['reload', 'urls', 'clear', 'flow', 'flowall', 'quit', 'restart', 'help']) {
       expect(text).toContain(name)
     }
-    for (const short of ['r', 'u', 'c', 'q', 'h']) {
+    for (const short of ['r', 'u', 'c', 'f', 'fa', 'q', 'h']) {
       expect(text).toContain(`${short} | `)
     }
     expect(text).toContain('用法：pnpm dev')
@@ -150,6 +164,40 @@ describe('Cli 命令执行（run）', () => {
     expect(lines.join('\n')).toContain('服务重启完成')
   })
 
+  it('f / flow → 清零指定设备；无参数时只提示用法', async () => {
+    const { host, resetFlow } = makeHost()
+    const { lines, restore } = captureLog()
+    await new Cli(host).run('f DEV1')
+    const usageLines = lines.length
+    await new Cli(host).run('flow')
+    restore()
+
+    expect(resetFlow).toHaveBeenCalledTimes(1)
+    expect(resetFlow).toHaveBeenCalledWith('DEV1')
+    expect(lines.slice(0, usageLines).join('\n')).toContain('累计流量已清零')
+    expect(lines[usageLines]).toContain('用法：flow <设备编号>')
+  })
+
+  it('fa / flowall → 清零所有设备（不传设备编号）', async () => {
+    const { host, resetFlow } = makeHost()
+    const { lines, restore } = captureLog()
+    await new Cli(host).run('fa')
+    restore()
+
+    expect(resetFlow).toHaveBeenCalledWith()
+    expect(lines.join('\n')).toContain('累计流量已清零（1 台）：DEV1')
+  })
+
+  it('无匹配设备时给出说明（不看起来像没执行）', async () => {
+    const { host, resetFlow } = makeHost()
+    resetFlow.mockResolvedValue({ devices: [] })
+    const { lines, restore } = captureLog()
+    await new Cli(host).run('flowall')
+    restore()
+
+    expect(lines.join('\n')).toContain('没有匹配的设备')
+  })
+
   it('q / quit → 优雅关闭（不带兜底强退，那是入口职责）', async () => {
     const { host, stop } = makeHost()
     await new Cli(host).run('q')
@@ -177,7 +225,7 @@ describe('Cli 命令执行（run）', () => {
   })
 
   it('空行不输出；未知命令给出提示且不触碰 host', async () => {
-    const { host, reload, restart, stop } = makeHost()
+    const { host, reload, restart, stop, resetFlow } = makeHost()
     const { lines, restore } = captureLog()
     await new Cli(host).run('')
     await new Cli(host).run('   ')
@@ -189,6 +237,7 @@ describe('Cli 命令执行（run）', () => {
     expect(reload).not.toHaveBeenCalled()
     expect(restart).not.toHaveBeenCalled()
     expect(stop).not.toHaveBeenCalled()
+    expect(resetFlow).not.toHaveBeenCalled()
   })
 
   it('命令执行失败只打印错误，不抛出（交互循环不中断）', async () => {

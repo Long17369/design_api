@@ -5,6 +5,7 @@ import { registerConfigSection } from '@core/config'
 import { log } from '@core/logger'
 import { Database } from '@core/database'
 import { DirectModuleError, DirectModule } from '@modules/directModule'
+import { SensorModule } from '@modules/sensorModule'
 import { Closable } from '@core/lifecycle'
 import {
   DATA_SOURCES,
@@ -19,6 +20,8 @@ import {
   handleDirectConfigList,
   handleDirectDeviceData,
   handleDirectUpdate,
+  handleFlowReset,
+  handleFlowTotal,
   handleTable,
   handleTimeRange,
 } from './utils'
@@ -31,6 +34,7 @@ export class HttpServer implements Closable {
   private app: express.Express
   private database: Database | null = null
   private directModule: DirectModule | null = null
+  private sensorModule: SensorModule | null = null
   private server: http.Server | null = null
 
   /** 事件订阅注销句柄集合（强引用监听；close 时统一注销） */
@@ -66,6 +70,11 @@ export class HttpServer implements Closable {
     this.directModule = directModule
   }
 
+  /** 注入传感器数据模块（处理 /sensor/flow/* 接口） */
+  public setSensorModule(sensorModule: SensorModule) {
+    this.sensorModule = sensorModule
+  }
+
   /** 获取数据库实例，未注入时报错 */
   private db(): Database {
     if (!this.database) {
@@ -80,6 +89,14 @@ export class HttpServer implements Closable {
       throw new Error('HttpServer 尚未注入 DirectModule 实例')
     }
     return this.directModule
+  }
+
+  /** 获取传感器数据模块，未注入时报错 */
+  private sensor(): SensorModule {
+    if (!this.sensorModule) {
+      throw new Error('HttpServer 尚未注入 SensorModule 实例')
+    }
+    return this.sensorModule
   }
 
   public bindServer() {
@@ -158,6 +175,16 @@ export class HttpServer implements Closable {
     this.app.get(
       `${API_BASE}/sensor/devices`,
       wrap((req, res) => handleDataDevices(this.db(), req, res)),
+    )
+
+    // 流量总计：库口径积分查询 + 清零（走 SensorModule：累计流量由该模块持有）
+    this.app.get(
+      `${API_BASE}/sensor/flow/total`,
+      wrap((req, res) => handleFlowTotal(this.sensor(), req, res)),
+    )
+    this.app.post(
+      `${API_BASE}/sensor/flow/reset`,
+      wrap((req, res) => handleFlowReset(this.sensor(), req, res)),
     )
 
     // 指令(direct)接口：由 DirectModule 处理（暂只接 HTTP，真实控制下发待接入）

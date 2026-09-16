@@ -439,7 +439,12 @@ export class Database implements Closable {
   }
 
   /**
-   * 查询 c_time 时间范围
+   * 查询 c_time 时间范围。
+   *
+   * 时间一律用 `DATE_FORMAT` 在库侧格式化成 `'YYYY-MM-DD HH:mm:ss'`：驱动对 `DATETIME`
+   * 的解析受连接时区影响（会按连接时区做一次换算），而库里存的是**设备上报的墙上时钟**，
+   * 直接用驱动解析出的 `Date` 会平白多出一个时区偏移。
+   *
    * @param table 表名
    * @param where 查询条件
    * @returns { minTime, maxTime }
@@ -455,7 +460,9 @@ export class Database implements Closable {
       throw new Error(`表 ${info.name} 没有 c_time 列，无法计算时间范围`)
     }
     const { sql: whereSQL, params } = buildWhereSQL(info, where)
-    const sql = `SELECT MIN(c_time) AS minTime, MAX(c_time) AS maxTime FROM ${quote(info.name)}${whereSQL}`
+    const sql =
+      `SELECT DATE_FORMAT(MIN(c_time), '%Y-%m-%d %H:%i:%s') AS minTime, ` +
+      `DATE_FORMAT(MAX(c_time), '%Y-%m-%d %H:%i:%s') AS maxTime FROM ${quote(info.name)}${whereSQL}`
     const [rows] = await this.query(sql, params, true)
     const row = (rows as Array<{ minTime: string | null; maxTime: string | null }>)[0]
     return { minTime: row?.minTime ?? null, maxTime: row?.maxTime ?? null }

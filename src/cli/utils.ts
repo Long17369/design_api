@@ -1,4 +1,4 @@
-import { CliCommandDef, CliOptions } from '.'
+import { CliCommandDef, CliOptions, ResolvedCommand } from '.'
 
 /** 默认配置文件（相对进程工作目录，支持 `@root/` 别名） */
 export const DEFAULT_CONFIG_PATH = '@root/config.json'
@@ -74,16 +74,27 @@ export const COMMANDS: CliCommandDef[] = [
   { short: 'r', name: 'reload', desc: '重新读取配置文件并热更新' },
   { short: 'u', name: 'urls', desc: '显示各服务地址' },
   { short: 'c', name: 'clear', desc: '清空终端' },
+  { short: 'f', name: 'flow', desc: '清零指定设备的累计流量（用法：flow <设备编号>）', maxArgs: 1 },
+  { short: 'fa', name: 'flowall', desc: '清零所有设备的累计流量' },
   { short: 'q', name: 'quit', desc: '退出服务（优雅关闭）' },
   { short: null, name: 'restart', desc: '进程内重启（重新装配全部组件，仅全名）' },
   { short: 'h', name: 'help', desc: '显示本帮助与启动帮助' },
 ]
 
-/** 解析一行输入：短名与全名都认（大小写不敏感）；空行/未知返回 undefined */
-export function resolveCommand(input: string): CliCommandDef | undefined {
-  const key = input.trim().toLowerCase()
+/**
+ * 解析一行输入：短名与全名都认（大小写不敏感）；空行/未知命令返回 undefined。
+ * 命令名之后的空白分隔词作为参数（超出该命令 `maxArgs` 的输入按未知命令处理）。
+ */
+export function resolveCommand(input: string): ResolvedCommand | undefined {
+  const parts = input
+    .trim()
+    .split(/\s+/)
+    .filter((part) => part !== '')
+  const key = (parts.shift() ?? '').toLowerCase()
   if (key === '') return undefined
-  return COMMANDS.find((item) => item.name === key || item.short === key)
+  const command = COMMANDS.find((item) => item.name === key || item.short === key)
+  if (!command || parts.length > (command.maxArgs ?? 0)) return undefined
+  return { command, args: parts }
 }
 
 /** 运行中帮助：命令清单 + 启动帮助 */

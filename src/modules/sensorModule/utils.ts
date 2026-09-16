@@ -79,6 +79,99 @@ export function parseTime(value: string): number {
   return Number.isNaN(t) ? Date.now() : t
 }
 
+/** 毫秒时间戳 → 'YYYY-MM-DD HH:mm:ss'（本机时区，与落库 `c_time` 的墙上时钟同源） */
+export function formatTime(ms: number): string {
+  const at = new Date(ms)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return (
+    `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ` +
+    `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`
+  )
+}
+
+/**
+ * 落库时间（驱动按连接时区解析出的 `Date`）→ 毫秒时间戳。
+ *
+ * 驱动对 `DATETIME` 会按连接时区做一次换算，因此这个绝对时间戳不保证与上报时间同基准；
+ * 它只用于**同源数据之间**的比较（如落库帧之间的帧间差值，基准在相减时自动抵消）。
+ * 需要与上报时间同基准时（如窗口起点）请用字符串交给库侧比较。
+ */
+export function frameTime(value: unknown): number | null {
+  if (value === null || value === undefined) return null
+  if (value instanceof Date) return value.getTime()
+  const text = String(value)
+  return text === '' ? null : Date.parse(text.includes('T') ? text : text.replace(' ', 'T'))
+}
+
+/** 按 `api_name` 取落库列名（`sensor_data_mapper.db_name`）；无映射返回 null */
+export function dbColumn(mapper: FieldMapper[], apiName: string): string | null {
+  return mapper.find((m) => m.api_name === apiName)?.db_name ?? null
+}
+
+/** 落库行 → 窗口采样点（缺测列跳过；时间列由 `frameTime` 解析） */
+export function samplesFromRows(
+  rows: Array<Record<string, unknown>>,
+  column: string,
+): SensorSample[] {
+  const samples: SensorSample[] = []
+  for (const row of rows) {
+    const t = frameTime(row['c_time'])
+    const v = toNum(row[column] as string | number | null | undefined)
+    if (t === null || v === null) continue
+    samples.push({ t, v })
+  }
+  return samples
+}
+
+/**
+ * 库口径的流量总计：上一帧落库值 + 本帧流量 × 间隔（间隔封顶 `maxGapSeconds`）。
+ * 间隔封顶用于避免停机 / 离线期间凭空累加；无基准帧（首次上报）时从 0 起算。
+ */
+export function accumulateFromBaseline(
+  baseline: number | null,
+  baselineAt: number | null,
+  flowRate: number | null,
+  now: number,
+  maxGapSeconds: number,
+): number {
+  const total = baseline !== null && baseline > 0 ? baseline : 0
+  if (flowRate === null || baselineAt === null) return total
+  const gapSeconds = Math.min((now - baselineAt) / 1000, maxGapSeconds)
+  if (gapSeconds <= 0) return total
+  return total + (flowRate * gapSeconds) / 60
+}
+
+/**
+ * 时间桶积分：Σ 桶均值 × 该桶承担的时长。
+ *
+ * 桶行只在桶内有落库帧时返回，故「桶承担的时长」分两种：
+ * - 与上一个桶相邻（标签差 ≈ 桶宽）⇒ 取实际标签差（上报间隔大于桶宽也不少算）；
+ * - 中间缺桶（标签差远大于桶宽）⇒ 该段本来是断点（停机/离线），最多按 `maxGapSeconds` 计入
+ *   —— 与实时累加的间隔封顶同一口径，避免把 13 小时的断点当成一帧的高流量。
+ *
+ * 注：封顶是**绝对秒数**，桶宽本身大于 `maxGapSeconds` 时（范围很大 ⇒ 桶很粗）也会被压到封顶值，
+ * 上报间隔本身就超过 `maxGapSeconds` 的设备应把该值调大。
+ * 桶内该列全缺测（`v === null`）的段整段跳过。
+ */
+export function integrateBuckets(
+  points: Array<{ t: number; v: number | null }>,
+  options: { stepSeconds: number; maxGapSeconds: number },
+): number {
+  const { stepSeconds, maxGapSeconds } = options
+  let total = 0
+  for (let i = 1; i < points.length; i++) {
+    const previous = points[i - 1]
+    const current = points[i]
+    if (!previous || !current || current.v === null) continue
+    const dtSeconds = (current.t - previous.t) / 1000
+    if (dtSeconds <= 0) continue
+    // 标签差明显超过桶宽 ⇒ 中间缺桶（断点）：封顶后再计入
+    const span = dtSeconds <= stepSeconds * 1.5 ? dtSeconds : Math.min(dtSeconds, maxGapSeconds)
+    total += (current.v * span) / 60
+  }
+  return total
+}
+
 /**
  * 跳变检测（数据质量）：任一监控字段相对上一帧的变化超过对应阈值即视为本帧跳变。
  * 返回本帧是否跳变；累计帧数与「标记 invalid」由调用方按 `spikeFrames` 决定（多帧累计防抖）。
