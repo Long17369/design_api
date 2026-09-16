@@ -72,6 +72,10 @@ export class Screen {
    *
    * 顺序很关键：**先记录日志锚点，再设定滚动区** —— DECSTBM（`ESC[<t>;<b>r`）
    * 会把光标带回左上角，若先设滚动区再记录，锚点会落到首行、新日志会覆盖启动输出。
+   *
+   * 锚点还**必须落在滚动区内**（`1..regionBottom`）：写日志是「回到锚点写一行 + 换行」，
+   * 换行只有发生在滚动区底行才会触发上滚；锚点若落在底部固定区（终端启动时若光标本来
+   * 就在最下面，DECSC 记下的就是那一行），日志就会一行行压在状态行/输入行上、不再上滚。
    */
   public async attach(): Promise<boolean> {
     if (this.active) return true
@@ -86,9 +90,14 @@ export class Screen {
     const cursorRow = await this.queryCursorRow()
     this.active = true
 
-    // 屏幕已满（光标在底部固定区）⇒ 先归一化到滚动区底行（上滚一行，丢弃最旧一行）
-    if (cursorRow !== null && cursorRow > this.regionBottom()) {
-      this.output.write(`${ESC}${this.regionBottom()};1H\n`)
+    const bottom = this.regionBottom()
+    // 屏幕已满（光标在底部固定区）⇒ 先上滚一行，丢掉最旧一行、保住启动输出的位置
+    if (cursorRow !== null && cursorRow > bottom) {
+      this.output.write(`${ESC}${this.rows};1H\n`)
+    }
+    // 光标位置不可用（终端不回 DSR / 已在底部固定区）⇒ 锚点直接落到滚动区底行
+    if (cursorRow === null || cursorRow > bottom) {
+      this.output.write(`${ESC}${bottom};1H`)
     }
     // 记录日志锚点：之后写日志都回到这里，折行/滚动交给终端
     this.output.write(SAVE_CURSOR)
@@ -105,7 +114,7 @@ export class Screen {
 
   /**
    * 问终端当前光标行（DSR：发 `ESC[6n`，终端回 `ESC[<row>;<col>R`）。
-   * 拿不到回复返回 null（部分终端/伪终端不回）—— 调用方按“直接记录当前位置”处理。
+   * 拿不到回复返回 null（部分终端/伪终端不回）—— 调用方把日志锚点落到滚动区底行。
    */
   private queryCursorRow(): Promise<number | null> {
     return new Promise((resolve) => {
@@ -239,6 +248,8 @@ export class Screen {
   private handleResize(): void {
     this.measure()
     this.applyScrollRegion()
+    // 尺寸变化后终端里存的锚点（绝对行号）可能已落到滚动区外 ⇒ 重新落到滚动区底行
+    this.output.write(`${ESC}${this.regionBottom()};1H${SAVE_CURSOR}`)
     this.redraw()
   }
 

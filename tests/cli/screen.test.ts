@@ -96,24 +96,52 @@ describe('Screen 布局（滚动区 + 底部固定两行）', () => {
     expect(input.raw).toBe(true)
   })
 
-  it('attach：光标在滚动区内 → 不做归一化', async () => {
+  it('attach：光标在滚动区内 → 不做归一化（锚点就用当前位置）', async () => {
     const { screen, output } = makeScreen({}, { reply: '\u001b[12;1R' })
     await screen.attach()
 
-    expect(output.text()).not.toContain(`${ESC}22;1H\n`)
+    expect(output.text()).not.toContain(`${ESC}22;1H`) // 不额外定位
+    expect(output.text()).not.toContain(`${ESC}24;1H\n`) // 也不上滚
+    // 锚点紧跟位置查询之后记录（顺序：查询 → 记录锚点 → 设滚动区）
+    expect(output.text()).toContain(`${ESC}6n${SAVE}`)
   })
 
-  it('attach：屏幕已满（光标在底部固定区）→ 归一化到滚动区底行', async () => {
-    const { screen, output } = makeScreen({}, { reply: '\u001b[30;1R' })
+  it('attach：屏幕已满（光标已到底行）→ 上滚一行，且锚点落到滚动区底行', async () => {
+    const { screen, output } = makeScreen({}, { reply: '\u001b[24;1R' })
     await screen.attach()
 
-    expect(output.text()).toContain(`${ESC}22;1H\n`) // 上滚一行，把锚点挪进滚动区
+    const text = output.text()
+    expect(text).toContain(`${ESC}24;1H\n`) // 先上滚一行（此刻滚动区还是整屏）
+    expect(text).toContain(`${ESC}22;1H${SAVE}`) // 锚点必须落在滚动区内
+    expect(text.indexOf(`${ESC}22;1H${SAVE}`)).toBeLessThan(text.indexOf(`${ESC}1;22r`))
   })
 
-  it('attach：终端不回 DSR 时也能接管（退化为直接记录当前位置）', async () => {
+  it('attach：光标在底部固定区（倒数第二行）→ 同样把锚点落回滚动区底行', async () => {
+    const { screen, output } = makeScreen({}, { reply: '\u001b[23;1R' })
+    await screen.attach()
+
+    expect(output.text()).toContain(`${ESC}22;1H${SAVE}`)
+  })
+
+  it('attach：终端不回 DSR → 锚点退化为滚动区底行（否则日志写不下去）', async () => {
     const { screen, output } = makeScreen()
     expect(await screen.attach()).toBe(true)
-    expect(output.text()).not.toContain(`${ESC}22;1H\n`)
+
+    const text = output.text()
+    expect(text).toContain(`${ESC}22;1H${SAVE}`)
+    expect(text).not.toContain(`${ESC}24;1H\n`) // 位置不明，不擅自上滚
+  })
+
+  it('resize：尺寸变化后锚点重新落到滚动区底行', async () => {
+    const { screen, output } = makeScreen({}, { reply: '\u001b[12;1R' })
+    await screen.attach()
+    output.reset()
+
+    output.rows = 40
+    output.emit('resize')
+
+    expect(output.text()).toContain(`${ESC}38;1H${SAVE}`) // 40 - 2
+    expect(output.text()).toContain(`${ESC}1;38r`)
   })
 
   it('print：恢复到日志锚点直接写（折行/滚动交给终端），再重绘底部', async () => {
