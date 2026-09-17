@@ -167,8 +167,11 @@ export class DirectModule implements Closable {
     const source = params.source ?? 'manual'
 
     let storedValue: string
+    let previous: string | null
     try {
-      storedValue = await this.writeValue(config_id, params.value, d_no)
+      const written = await this.writeValue(config_id, params.value, d_no)
+      storedValue = written.storedValue
+      previous = written.previous
     } catch (err) {
       // 失败也通知前端（如被保护性锁定拦截），随后原样抛出
       if (notify) {
@@ -184,10 +187,11 @@ export class DirectModule implements Closable {
     }
 
     // 控制记录（control_log）统一在此落库：各调用方（手动控制/自动控制/配置页/设备同步/复位）
-    // 不再各写各的，避免再漏（曾漏掉配置页 /api/direct/update 的手动操作）
+    // 不再各写各的，避免再漏（曾漏掉配置页 /api/direct/update 的手动操作）；
+    // field4 记本次写入的值，field6 记本次修改前的值
     await this.db().insert(
       'control_log',
-      controlLogRow(d_no, config_id, storedValue, params.reason ?? '', source),
+      controlLogRow(d_no, config_id, storedValue, params.reason ?? '', source, previous),
     )
 
     // 写库成功后：先下发设备，再通知前端（前端刷新时指令已发出）
@@ -310,13 +314,13 @@ export class DirectModule implements Closable {
   }
 
   /**
-   * 写入 direct 表（校验 + UPSERT），返回规范化后的存储值。
+   * 写入 direct 表（校验 + UPSERT），返回规范化后的存储值与**修改前的值**（原先不存在时为 null）。
    */
   private async writeValue(
     config_id: string,
     value: string | number,
     d_no: string,
-  ): Promise<string> {
+  ): Promise<{ previous: string | null; storedValue: string }> {
     const db = this.db()
 
     // 保护性锁定：被锁的目标禁止「开启」（关闭动作不受限，保护动作可正常执行）
@@ -334,7 +338,10 @@ export class DirectModule implements Closable {
     }
     const storedValue = validateValue(config, value)
 
-    const existing = await db.executeQuery<{ id: number }>(directKeyQuery(config_id, d_no))
+    const existing = await db.executeQuery<{ id: number; value: string | null }>(
+      directKeyQuery(config_id, d_no),
+    )
+    const previous = existing[0]?.value ?? null
 
     if (existing.length > 0) {
       await db.update('direct', { value: storedValue }, directKeyWhere(config_id, d_no))
@@ -342,7 +349,7 @@ export class DirectModule implements Closable {
       await db.insert('direct', { config_id, value: storedValue, d_no })
     }
     logger.info(`指令已更新: [${d_no}] ${config_id} = ${storedValue}`)
-    return storedValue
+    return { previous, storedValue }
   }
 
   /**

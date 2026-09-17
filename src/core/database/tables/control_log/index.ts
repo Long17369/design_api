@@ -17,7 +17,7 @@ const base_columns: ColumnInfo[] = [
   },
 ]
 
-const additional_columns_count = 5
+const additional_columns_count = 6
 
 const additional_columns = generateFields(additional_columns_count)
 

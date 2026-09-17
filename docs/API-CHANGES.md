@@ -523,5 +523,6 @@ UPDATE sensor_data SET field7 = NULL WHERE field7 IN (65535, 6553.5);  -- pressu
 - `field2`(控制对象) = `config_id`，不再只有 `heat`/`water` ⇒ 其余配置项显示**原始配置码**
   （`control_log_mapper.mapping` 目前只映射 heat/water）。
 - `field3`(动作) 沿用旧实现 `value === '1' ? 'on' : 'off'` ⇒ 非 0/1 的取值（如 `pid_target=45`）记为 `off`。
+- `field4`(控制值) = 本次写入的值，`field6`(原始值) = **本次修改前**该指令的值（该设备原先没有这条指令时为 `null`）。
 - 同一动作**只记一条**（记录点从 5 处收敛到 1 处）。
 

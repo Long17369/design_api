@@ -133,11 +133,11 @@ export function directKeyWhere(config_id: string, d_no: string): Where {
   }
 }
 
-/** direct 表按「配置码 + 设备」取 1 条的查询参数 */
+/** direct 表按「配置码 + 设备」取 1 条（`id` 判存在，`value` 供控制记录记「修改前的值」） */
 export function directKeyQuery(config_id: string, d_no: string): DataQueryParams {
   return {
     table: 'direct',
-    columns: ['id'],
+    columns: ['id', 'value'],
     ...QUERY_BASE,
     limit: '1',
     where: directKeyWhere(config_id, d_no),
@@ -156,8 +156,9 @@ export function directValueQuery(config_id: string, d_no: string): DataQueryPara
 }
 
 /**
- * 控制记录行（control_log field1..5），供手动控制/复位/设备状态同步落库。
- * field1=来源(manual/auto/config/device) field2=控制对象 field3=动作 field4=值 field5=理由
+ * 控制记录行（control_log field1..6），由 `DirectModule.setValue` 统一落库。
+ * field1=来源(manual/auto/config/device) field2=控制对象 field3=动作
+ * field4=控制值（本次写入的值） field5=理由 field6=原始值（**本次修改前**的值，首次写入为 null）
  */
 export function controlLogRow(
   d_no: string,
@@ -165,6 +166,7 @@ export function controlLogRow(
   value: string,
   reason: string,
   source: NonNullable<SetValueParams['source']> = 'manual',
+  previous: string | null = null,
 ): Record<string, SqlValue> {
   return {
     d_no,
@@ -174,6 +176,7 @@ export function controlLogRow(
     field3: value === '1' ? 'on' : 'off',
     field4: value,
     field5: reason,
+    field6: previous,
   }
 }
 

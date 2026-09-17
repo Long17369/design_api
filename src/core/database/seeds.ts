@@ -92,16 +92,18 @@ export const TABLE_SEEDS: TableSeed[] = [
       'chartable',
       'mapping',
     ],
+    // id, f_name, db_name, p_name, unit, type, visible, chartable, mapping
     // prettier-ignore
     rows: [
       [1, 'ID',       'id',     'id',     '', '1', '0', '0', null],
-      [2, '设备编号', 'd_no',   'id',     '', '1', '1', '0', null],
-      [3, '操作时间', 'c_time', 'time',   '', '1', '1', '0', null],
-      [4, '控制来源', 'field1', 'source', '', '1', '1', '0', '{"manual":"手动控制","auto":"自动控制","config":"参数配置","device":"设备"}'],
-      [5, '控制对象', 'field2', 'target', '', '1', '1', '0', '{"heat":"加热开关","water":"水泵开关"}'],
-      [6, '控制动作', 'field3', 'action', '', '1', '1', '0', '{"on":"开","off":"关"}'],
-      [7, '控制值',   'field4', 'value',  '', '1', '1', '1', null],
+      [2, '设备编号', 'd_no',   'id',     '', '1', '0', '0', null],
+      [3, '控制来源', 'field1', 'source', '', '1', '1', '0', '{"manual":"手动控制","auto":"自动控制","config":"参数配置","device":"设备"}'],
+      [4, '控制对象', 'field2', 'target', '', '1', '1', '0', '{"heat":"加热开关","water":"水泵开关"}'],
+      [5, '控制动作', 'field3', 'action', '', '1', '1', '0', '{"on":"开","off":"关"}'],
+      [6, '原始值',   'field6', 'raw',    '', '1', '1', '0', null],
+      [7, '控制值',   'field4', 'value',  '', '1', '1', '0', null],
       [8, '控制理由', 'field5', 'reason', '', '1', '1', '0', null],
+      [9, '操作时间', 'c_time', 'time',   '', '1', '1', '0', null],
     ],
   },
 
