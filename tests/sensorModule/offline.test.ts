@@ -7,6 +7,7 @@ import {
   parseInvalidValues,
   pushSample,
   stripInvalidValues,
+  toWsData,
 } from '@modules/sensorModule/utils'
 import type { DeviceState } from '@modules/sensorModule'
 import type { DataPayload, FieldMapper } from '@/types/types'
@@ -35,10 +36,10 @@ const mapper = [
 ] as unknown as FieldMapper[]
 
 describe('无效上报值剔除（按 sensor_data_mapper.invalid_value 配置）', () => {
-  it('命中配置值 → 置为空串（缺测）', () => {
+  it('命中配置值 → 置为 null（缺测）', () => {
     const out = stripInvalidValues(frame({ temp_in: '6553.5', temp_out: '6553.5' }), mapper)
-    expect(out.temp_in).toBe('')
-    expect(out.temp_out).toBe('')
+    expect(out.temp_in).toBeNull()
+    expect(out.temp_out).toBeNull()
     // 其余字段不受影响
     expect(out.pressure).toBe('1.2')
     expect(out.flow_rate).toBe('8.62')
@@ -49,8 +50,8 @@ describe('无效上报值剔除（按 sensor_data_mapper.invalid_value 配置）
 
   it('开关类字段同样参与（实测 heat_Y1/water_Y2 = 65535）', () => {
     const out = stripInvalidValues(frame({ heat_Y1: 65535, water_Y2: 65535 }), mapper)
-    expect(out.heat_Y1).toBe('')
-    expect(out.water_Y2).toBe('')
+    expect(out.heat_Y1).toBeNull()
+    expect(out.water_Y2).toBeNull()
   })
 
   it('字符串与数字两种上报形态都命中', () => {
@@ -58,14 +59,22 @@ describe('无效上报值剔除（按 sensor_data_mapper.invalid_value 配置）
       frame({ flow_rate: '655.35', pressure: 6553.5, temp_in: 6553.5 }),
       mapper,
     )
-    expect(out.flow_rate).toBe('')
-    expect(out.pressure).toBe('')
-    expect(out.temp_in).toBe('')
+    expect(out.flow_rate).toBeNull()
+    expect(out.pressure).toBeNull()
+    expect(out.temp_in).toBeNull()
   })
 
   it('未配置无效值的字段不剔除（纯数据驱动）', () => {
     const out = stripInvalidValues(frame({ liu_liang1: 6553.5 }), mapper)
     expect(out.liu_liang1).toBe(6553.5)
+  })
+
+  it('命中字段转 WS 契约后为空串（前端与自动控制按缺测）', () => {
+    const out = stripInvalidValues(frame({ temp_in: '6553.5', heat_Y1: 65535 }), mapper)
+    const ws = toWsData(out)
+    expect(ws.wen_du1).toBe('')
+    expect(ws.jia_re).toBe('')
+    expect(ws.wen_du2).toBe('40.0')
   })
 
   it('正常值（含 0 与邻近值）不动', () => {
@@ -80,8 +89,8 @@ describe('无效上报值剔除（按 sensor_data_mapper.invalid_value 配置）
   })
 
   it('缺测/空值不报错也不改动', () => {
-    const out = stripInvalidValues(frame({ temp_in: '', temp_out: undefined as never }), mapper)
-    expect(out.temp_in).toBe('')
+    const out = stripInvalidValues(frame({ temp_in: null, temp_out: undefined as never }), mapper)
+    expect(out.temp_in).toBeNull()
     expect(out.temp_out).toBeUndefined()
   })
 
@@ -111,7 +120,7 @@ describe('无效值清单解析（invalid_value）', () => {
   })
 })
 
-describe('缺测（空值）不污染派生值与落库', () => {
+describe('缺测（null / 空值）不污染派生值与落库', () => {
   const state = (): DeviceState =>
     ({
       totalFlow: 0,
@@ -144,7 +153,7 @@ describe('缺测（空值）不污染派生值与落库', () => {
     expect(accumulateFlow(st, null, 63_000)).toBeCloseTo(60, 5)
   })
 
-  it('落库行跳过空值（该列写 NULL）', () => {
+  it('落库行把缺测值写为 NULL，本帧没有的字段不写该列', () => {
     const mapper: FieldMapper[] = [
       { api_name: 'temp_in', db_name: 'field1' },
       { api_name: 'temp_out', db_name: 'field2' },
@@ -152,10 +161,10 @@ describe('缺测（空值）不污染派生值与落库', () => {
       { api_name: 'pressure', db_name: 'field7' },
     ] as FieldMapper[]
     const row = buildSensorRow(
-      frame({ temp_in: '', temp_out: '40.0', pressure: undefined as never }),
+      frame({ temp_in: null, temp_out: '40.0', pressure: undefined as never }),
       mapper,
       { liu_liang1: '12.5' },
     )
-    expect(row).toEqual({ field2: '40.0', field5: '12.5' })
+    expect(row).toEqual({ field1: null, field2: '40.0', field5: '12.5' })
   })
 })

@@ -136,8 +136,8 @@
   - 引擎 `blockDevice`：`blocked` 锁已存在时不再重复 acquire；手动复位补写 `error_msg(category='release', code='block_release')`
   - **颜色/分类约定**：堵塞类 `error` 红 + `field3='block'`；解除类 `warning` 黄 + 独立 `field3='release'` + `type='reset'`（修「压力解锁被当堵塞染红」）
 - [x] **无效上报值剔除**（2026-09-14 首版 → 2026-09-15 改为数据库驱动）：设备断线时回 **0xFFFF**，而各字段倍率不同 —— 实测（`logs/latest.log`，2026-09-15）温度/压力 → **6553.5**、瞬时流量 → **655.35**、**开关（`heat_Y1`/`water_Y2`）→ 65535**。原先会当作真实值进入自动控制（超温关加热、温度异常判堵塞）、前端曲线与落库
-  - 判定清单**落在数据库**：`sensor_data_mapper.invalid_value`（JSON 数组，逐字段配置；空/NULL = 不判定）；数据入口（`sensorModule.process`）按 mapper 剔除为**空串**（缺测），代码内不再写死哨兵常量
-  - 下游天然一致：`toNum('')` → null（组件按缺测跳过）、`buildSensorRow` 跳过空值（该列**落库为 NULL**）、`pushSample`/`accumulateFlow` 跳过 null ⇒ 一处生效
+  - 判定清单**落在数据库**：`sensor_data_mapper.invalid_value`（JSON 数组，逐字段配置；空/NULL = 不判定）；数据入口（`sensorModule.process`）按 mapper 剔除为 **`null`**（缺测），代码内不再写死哨兵常量
+  - 下游天然一致：`toNum(null)` → null（组件按缺测跳过）、`toStr(null)` → `''`（WS 推空串）、`buildSensorRow` 把缺测值**显式落库为 NULL**（列进 INSERT、值为 NULL；本帧没有的字段才不写该列）、`pushSample`/`accumulateFlow` 跳过 null ⇒ 一处生效
   - 开关字段也纳入（旧版只覆盖四个测量量 ⇒ 65535 会一路进 WS `jia_re`/`shui_beng` 与 `field3`/`field4`）；设备状态同步对缺测本就跳过（`reportedState('')` → undefined），剔除后不再被 65535 误判为「泵/加热已关」
 - [x] 设备状态同步（2026-09-16 起**归 `directModule/dispatch.ts`**，不再属于自动控制）：设备上报开关状态与 `direct` 指令值**连续 `direct.device_sync.frames` 帧不一致** → 以**设备实际状态**为准（写 direct + 下发 + `source='device'` 通知 + `control_log(field1='device')` + `device_sync` 告警）；**默认 0（关闭）**，可按设备启用
   - **按上报帧对账**（2026-09-16 修正：一度改成「只在指令下发前对账」⇒ 没有下发动作时设备自己改了状态也不回写，已改回）：每帧上报都把「`direct` 表里的指令值 vs 设备上报状态」对账，连续达到 `frames` 帧不一致即回写；**指令值刚变化的那一帧只重新计数、不触发**（留一帧给设备执行新指令，避免刚下发的控制被设备上报滞后顶回去）；指令或上报缺测不判定

@@ -526,3 +526,14 @@ UPDATE sensor_data SET field7 = NULL WHERE field7 IN (65535, 6553.5);  -- pressu
 - `field4`(控制值) = 本次写入的值，`field6`(原始值) = **本次修改前**该指令的值（该设备原先没有这条指令时为 `null`）。
 - 同一动作**只记一条**（记录点从 5 处收敛到 1 处）。
 
+### 2026-09-17：无效上报值（`invalid_value`）在载荷层置 `null`，落库显式写 NULL
+
+命中 `sensor_data_mapper.invalid_value` 的字段，原先在 `stripInvalidValues` 里被置成**空串**、
+再由 `buildSensorRow` 跳过该列（靠"这帧不给这一列"换得库中 NULL）；现在**载荷层直接置 `null`**，
+落库时**显式写 NULL**（列照常出现在 `INSERT` 里、值为 NULL）。
+
+- 载荷侧（`DataPayload` 的测量字段）允许 `null`：无效值与"缺测"同义；本帧**完全没有**的字段
+  （`undefined`）仍不写该列 ⇒ 库中可区分「上报了但无效」与「本帧没有该字段」
+- WS 推送不变：仍按缺测推**空串**（`toStr(null)` → `''`），前端与自动控制无需改动
+- 存量数据无需迁移：该列在库中本来就是 NULL（见 2026-09-15 的清理 SQL）
+

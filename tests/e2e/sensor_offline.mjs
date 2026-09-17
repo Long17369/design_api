@@ -148,7 +148,7 @@ const twice = await waitFor(async () => (await offlineRows()) === 2, 25_000)
 result.phase4 = { rows: await offlineRows(), twice }
 
 // ---------- ⑤ 无效上报值（断线回 0xFFFF）→ 按缺测处理 ----------
-// 期望：该列不入库（NULL）、WS 推送里该字段为空串（前端与自动控制均按缺测）
+// 期望：该列落库为 NULL（显式写入）、WS 推送里该字段为空串（前端与自动控制均按缺测）
 // 字段倍率不同：温度/压力 6553.5、瞬时流量 655.35、开关 65535（见 sensor_data_mapper.invalid_value）
 const tempCol =
   (await q("SELECT db_name FROM sensor_data_mapper WHERE api_name = 'temp_in' LIMIT 1"))[0]
@@ -214,10 +214,10 @@ check(
 check('② 持续离线不重复告警', result.phase2.rows === 1)
 check('③ 恢复上报 → 推送 type=reset 事件', result.phase3.event?.data?.type === 'reset')
 check('④ 再次离线 → 可再次告警', result.phase4.rows === 2)
-check('⑤ 无效上报值 6553.5 不入库（列为 NULL）', result.phase5.tempIn === null)
+check('⑤ 无效上报值 6553.5 落库为 NULL', result.phase5.tempIn === null)
 check('⑤ WS 推送中该字段为空串（按缺测）', result.phase5.wsTempIn === '')
 check(
-  '⑤ 开关类无效值 65535 不入库 + WS 推空串',
+  '⑤ 开关类无效值 65535 落库 NULL + WS 推空串',
   result.phase5.heat === null && result.phase5.wsHeat === '',
 )
 

@@ -241,14 +241,15 @@ export interface DataQueryParams {
 export interface DataPayload {
   id: string // 设备/数据源 id（存入 t_data.d_no）
   time: string // 数据时间
-  temp_in: string | number // 温度1（进水，原 wen_du1）
-  temp_out: string | number // 温度2（出水，原 wen_du2）
-  heat_Y1: string | number // 加热开关状态（原 jia_re）
-  water_Y2: string | number // 水泵状态（原 shui_beng）
-  flow_rate: string | number // 瞬时流量 L/min（原 liu_liang2）
-  pressure: string | number // 水流压力
+  // 测量字段可为 `null`：命中 `sensor_data_mapper.invalid_value` 的无效上报值按缺测处理
+  temp_in: string | number | null // 温度1（进水，原 wen_du1）
+  temp_out: string | number | null // 温度2（出水，原 wen_du2）
+  heat_Y1: string | number | null // 加热开关状态（原 jia_re）
+  water_Y2: string | number | null // 水泵状态（原 shui_beng）
+  flow_rate: string | number | null // 瞬时流量 L/min（原 liu_liang2）
+  pressure: string | number | null // 水流压力
   // 预留：设备端累计流量（flow_source=0 数据验证时使用；当前设备端已移除，本地计算替代）
-  liu_liang1?: string | number
+  liu_liang1?: string | number | null
 }
 
 // 设备控制状态 (device_control) —— control/ 现为服务器下发 topic，已无入站处理

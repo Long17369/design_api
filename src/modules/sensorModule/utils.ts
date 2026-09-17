@@ -47,13 +47,13 @@ export function parseInvalidValues(raw: string | null | undefined): number[] {
 }
 
 /**
- * 剔除**无效上报值**（`invalid_value` 命中即置为**空串** = 缺测，类型仍合法）。
+ * 剔除**无效上报值**（`invalid_value` 命中即置为 `null` = 缺测）。
  *
  * 设备传感器断线 / 无回数时回 **0xFFFF**，而各字段倍率不同，故实际无效值按字段配置在
  * 数据库（`sensor_data_mapper.invalid_value`），不再写死在代码里：
  * 实测（2026-09-15 20:15~20:20）温度/压力 → 6553.5、瞬时流量 → 655.35、开关 → 65535。
- * 下游一致按缺测处理：`toNum('')` → null（组件跳过判定）、`buildSensorRow` 跳过空值
- * （该列落库 NULL）、`pushSample`/`accumulateFlow` 跳过 null。
+ * 下游一致按缺测处理：`toNum(null)` → null（组件跳过判定）、`toStr(null)` → ''（WS 推空串）、
+ * `buildSensorRow` 把缺测值**显式落库为 NULL**、`pushSample`/`accumulateFlow` 跳过 null。
  */
 export function stripInvalidValues(payload: DataPayload, mapper: FieldMapper[]): DataPayload {
   const out = { ...payload }
@@ -63,7 +63,7 @@ export function stripInvalidValues(payload: DataPayload, mapper: FieldMapper[]):
     const invalid = parseInvalidValues(m.invalid_value)
     if (invalid.length === 0) continue
     const value = toNum(view[m.api_name] as string | number | undefined | null)
-    if (value !== null && invalid.includes(value)) view[m.api_name] = ''
+    if (value !== null && invalid.includes(value)) view[m.api_name] = null
   }
   return out
 }
@@ -187,7 +187,7 @@ function jumped(prev: number | null, cur: number | null, threshold: number): boo
 
 /**
  * 原始上报载荷 → 前端 WS 数据契约（沿用旧字段名）。
- * liu_liang1 / heat_rate / avg_flow 由本模块计算后覆盖，此处先取原始值 / 空串。
+ * liu_liang1 / heat_rate / avg_flow 由本模块计算后覆盖，此处先取原始值（缺测 `null` → 空串）。
  */
 export function toWsData(payload: DataPayload): WsData {
   return {
@@ -292,7 +292,8 @@ export function calcAvgFlow(samples: SensorSample[], windowSec: number, now: num
 /**
  * 按 sensor_data_mapper 的 api_name→db_name 映射组装落库行。
  * `computed`（按 `api_name` 索引）是**服务端算出的列**（累计流量 / 水泵·加热运行时长），
- * 优先于上报载荷；空值跳过（列留 NULL）；时间列（`c_time`）按本机时区解析成 `Date`，
+ * 优先于上报载荷；**缺测值（`null` / 空串）显式写 NULL**（如命中 `invalid_value` 的字段），
+ * 本帧完全没有的字段（`undefined`）才不写该列；时间列（`c_time`）按本机时区解析成 `Date`，
  * 其余列按原样（数字保留数字）。
  */
 export function buildSensorRow(
@@ -305,7 +306,11 @@ export function buildSensorRow(
   for (const m of mapper) {
     if (!m.api_name) continue
     const value = computed[m.api_name] ?? source[m.api_name]
-    if (value === undefined || value === null || value === '') continue
+    if (value === undefined) continue
+    if (value === null || value === '') {
+      row[m.db_name] = null
+      continue
+    }
     if (m.db_name === 'c_time') {
       row[m.db_name] = new Date(parseTime(String(value)))
     } else {
