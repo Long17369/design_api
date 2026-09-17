@@ -73,34 +73,28 @@ export function fmt(n: number, digits = 2): string {
   return String(Number(n.toFixed(digits)))
 }
 
-/** 解析 'YYYY-MM-DD HH:mm:ss' 为毫秒时间戳；非法则回退当前时间 */
+/**
+ * 解析 'YYYY-MM-DD HH:mm:ss'（本机墙钟：无时区后缀即按本机时区）为毫秒时间戳；
+ * 非法则回退当前时间。
+ */
 export function parseTime(value: string): number {
   const t = Date.parse(value.includes('T') ? value : value.replace(' ', 'T'))
   return Number.isNaN(t) ? Date.now() : t
 }
 
-/** 毫秒时间戳 → 'YYYY-MM-DD HH:mm:ss'（本机时区，与落库 `c_time` 的墙上时钟同源） */
-export function formatTime(ms: number): string {
-  const at = new Date(ms)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return (
-    `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ` +
-    `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`
-  )
-}
-
 /**
- * 落库时间（驱动按连接时区解析出的 `Date`）→ 毫秒时间戳。
+ * 落库时间（驱动按**本机时区**解析出的 `Date`）→ 毫秒时间戳。
  *
- * 驱动对 `DATETIME` 会按连接时区做一次换算，因此这个绝对时间戳不保证与上报时间同基准；
- * 它只用于**同源数据之间**的比较（如落库帧之间的帧间差值，基准在相减时自动抵消）。
- * 需要与上报时间同基准时（如窗口起点）请用字符串交给库侧比较。
+ * 连接时区走 mysql2 默认（本机），与上报时间同基准 ⇒ 该时间戳可直接与
+ * `parseTime(上报时间)` 比较（窗口筛选、帧间差值）；字符串分支只为容错。
  */
 export function frameTime(value: unknown): number | null {
   if (value === null || value === undefined) return null
-  if (value instanceof Date) return value.getTime()
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.getTime()
   const text = String(value)
-  return text === '' ? null : Date.parse(text.includes('T') ? text : text.replace(' ', 'T'))
+  if (text === '') return null
+  const t = Date.parse(text.includes('T') ? text : text.replace(' ', 'T'))
+  return Number.isNaN(t) ? null : t
 }
 
 /** 按 `api_name` 取落库列名（`sensor_data_mapper.db_name`）；无映射返回 null */
@@ -198,7 +192,7 @@ function jumped(prev: number | null, cur: number | null, threshold: number): boo
 export function toWsData(payload: DataPayload): WsData {
   return {
     d_no: toStr(payload.id),
-    timestamp: toStr(payload.time),
+    timestamp: new Date(parseTime(toStr(payload.time))),
     wen_du1: toStr(payload.temp_in),
     wen_du2: toStr(payload.temp_out),
     jia_re: toStr(payload.heat_Y1),
@@ -257,7 +251,8 @@ export function calcAvgFlow(samples: SensorSample[], windowSec: number, now: num
 
 /**
  * 按 sensor_data_mapper 的 api_name→db_name 映射组装落库行。
- * liu_liang1 用计算后的累计流量；空值跳过（列留 NULL）。
+ * liu_liang1 用计算后的累计流量；空值跳过（列留 NULL）；
+ * 时间列（`c_time`）按本机时区解析成 `Date`，其余列按原样（数字保留数字）。
  */
 export function buildSensorRow(
   raw: DataPayload,
@@ -270,7 +265,11 @@ export function buildSensorRow(
     if (!m.api_name) continue
     const value = m.api_name === 'liu_liang1' ? totalFlow : source[m.api_name]
     if (value === undefined || value === null || value === '') continue
-    row[m.db_name] = typeof value === 'number' ? value : String(value)
+    if (m.db_name === 'c_time') {
+      row[m.db_name] = new Date(parseTime(String(value)))
+    } else {
+      row[m.db_name] = typeof value === 'number' ? value : String(value)
+    }
   }
   return row
 }

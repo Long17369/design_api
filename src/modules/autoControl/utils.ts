@@ -1,6 +1,6 @@
 import { log } from '@core/logger'
 import { Database } from '@core/database'
-import { formatNow } from '@core/utils'
+import { nowSecond } from '@core/utils'
 import { DirectModule } from '@modules/directModule'
 import { WsData } from '@/types/types'
 import {
@@ -176,7 +176,7 @@ export async function setControl(
   await dm.setValue({ config_id: target, value, d_no: dNo, source: 'auto' })
   await db.insert('control_log', {
     d_no: dNo,
-    c_time: formatNow(),
+    c_time: nowSecond(),
     field1: 'auto',
     field2: target,
     field3: value === '1' ? 'on' : 'off',

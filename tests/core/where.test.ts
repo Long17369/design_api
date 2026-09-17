@@ -28,7 +28,7 @@ describe('buildWhereSQL（操作符 → SQL 形态）', () => {
     expect(sql).toBe(
       ' WHERE `d_no` = ? AND `field1` LIKE ? AND `field2` NOT LIKE ? AND `c_time` >= ?',
     )
-    expect(params).toEqual(['DEV1', '%超温%', 'x%', '2026-09-01 00:00:00'])
+    expect(params).toEqual(['DEV1', '%超温%', 'x%', new Date('2026-09-01 00:00:00')])
   })
 
   it('集合操作符：in / not in 展开为 n 个占位符（单值视为 1 元集合）', () => {
@@ -46,7 +46,10 @@ describe('buildWhereSQL（操作符 → SQL 形态）', () => {
       c_time: { operator: 'between', value: ['2026-09-01 00:00:00', '2026-09-02 00:00:00'] },
     })
     expect(between.sql).toBe(' WHERE `c_time` BETWEEN ? AND ?')
-    expect(between.params).toEqual(['2026-09-01 00:00:00', '2026-09-02 00:00:00'])
+    expect(between.params).toEqual([
+      new Date('2026-09-01 00:00:00'),
+      new Date('2026-09-02 00:00:00'),
+    ])
 
     const notBetween = buildWhereSQL(info, {
       c_time: { operator: 'not between', value: ['a', 'b'] },
@@ -101,14 +104,34 @@ describe('buildWhereSQL（非法条件一律抛错）', () => {
 
   it('值类型不符：单值给数组/数字，集合里混入非字符串', () => {
     expect(() => buildWhereSQL(info, dirty({ d_no: { operator: '=', value: ['A'] } }))).toThrow(
-      '需要 1 个字符串条件值',
+      '需要 1 个条件值',
     )
     expect(() => buildWhereSQL(info, dirty({ d_no: { operator: '=', value: 1 } }))).toThrow(
-      '需要 1 个字符串条件值',
+      '需要 1 个条件值',
     )
     expect(() =>
       buildWhereSQL(info, dirty({ d_no: { operator: 'in', value: ['A', null] } })),
-    ).toThrow('条件值必须是字符串或字符串数组')
+    ).toThrow('条件值必须是字符串或日期')
+  })
+
+  it('时间条件值可直接传 Date（内部时间条件，如窗口起点 / 图表时间段）', () => {
+    const at = new Date('2026-09-12T00:00:00')
+    const { sql, params } = buildWhereSQL(info, { c_time: { operator: '>=', value: at } })
+    expect(sql).toBe(' WHERE `c_time` >= ?')
+    expect(params).toEqual([at])
+  })
+
+  it('时间列的字符串条件值（JSON 形式时间）解析成 Date 再比较', () => {
+    const { params } = buildWhereSQL(info, {
+      c_time: {
+        operator: 'between',
+        value: ['2026-09-12T00:00:00.000Z', '2026-09-12T01:00:00.000Z'],
+      },
+    })
+    expect(params).toEqual([
+      new Date('2026-09-12T00:00:00.000Z'),
+      new Date('2026-09-12T01:00:00.000Z'),
+    ])
   })
 
   it('未知操作符与不存在的列', () => {

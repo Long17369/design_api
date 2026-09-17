@@ -11,8 +11,8 @@ declare module '@modules/alarmModule' {
 
   /** error_msg 中某设备最新一条堵塞记录（field3='block'） */
   interface BlockErrorRow {
-    /** 故障时间（mysql2 返回 DATETIME 为 Date） */
-    c_time: Date | string
+    /** 故障时间（mysql2 按本机时区把 DATETIME 解析回 Date） */
+    c_time: Date
     /** 错误信息（前端预警横幅文案） */
     field1: string | null
     /** 错误代码（前端告警码，如 pressure_zero） */

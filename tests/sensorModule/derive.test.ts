@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   accumulateFromBaseline,
   dbColumn,
-  formatTime,
   frameTime,
   integrateBuckets,
   parseTime,
@@ -26,12 +25,7 @@ const mapper = (over: Partial<FieldMapper>): FieldMapper =>
   }) as FieldMapper
 
 describe('库口径时间解析', () => {
-  it('formatTime / parseTime 互为逆运算（墙体时钟写法）', () => {
-    const at = parseTime('2026-09-15 22:07:24')
-    expect(formatTime(at)).toBe('2026-09-15 22:07:24')
-  })
-
-  it('frameTime：Date 与字符串的帧间差一致（绝对基准可能被连接时区平移）', () => {
+  it('frameTime：Date / 字符串都解析成同一毫秒时间戳', () => {
     const at = parseTime('2026-09-15 22:07:24')
     expect(frameTime(new Date(at))).toBe(at)
     expect(frameTime('2026-09-15 22:07:24')).toBe(at)
@@ -39,6 +33,7 @@ describe('库口径时间解析', () => {
     expect((frameTime(new Date(at + 60_000)) ?? 0) - (frameTime(new Date(at)) ?? 0)).toBe(60_000)
     expect(frameTime(null)).toBeNull()
     expect(frameTime('')).toBeNull()
+    expect(frameTime(new Date('bad'))).toBeNull()
   })
 })
 
@@ -53,10 +48,10 @@ describe('字段映射（api_name → db_name）', () => {
 describe('落库行 → 窗口采样点', () => {
   it('缺测值（null/空串）跳过，时间与数值按帧解析', () => {
     const rows = [
-      { c_time: '2026-09-15 10:00:00', field6: 5 },
-      { c_time: '2026-09-15 10:00:01', field6: null },
-      { c_time: '2026-09-15 10:00:02', field6: '' },
-      { c_time: '2026-09-15 10:00:03', field6: '7.5' },
+      { c_time: new Date(parseTime('2026-09-15 10:00:00')), field6: 5 },
+      { c_time: new Date(parseTime('2026-09-15 10:00:01')), field6: null },
+      { c_time: new Date(parseTime('2026-09-15 10:00:02')), field6: '' },
+      { c_time: new Date(parseTime('2026-09-15 10:00:03')), field6: '7.5' },
     ]
     expect(samplesFromRows(rows, 'field6')).toEqual([
       { t: parseTime('2026-09-15 10:00:00'), v: 5 },

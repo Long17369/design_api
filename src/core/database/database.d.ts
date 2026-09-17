@@ -25,10 +25,10 @@ declare module '@core/database' {
   interface ChartQueryParams {
     /** 附加过滤条件（时间段由 start/end 决定，勿在此重复传 c_time） */
     where?: Where
-    /** 开始时间（含）'YYYY-MM-DD HH:mm:ss' */
-    start: string
+    /** 开始时间（含） */
+    start: Date
     /** 结束时间（含） */
-    end: string
+    end: Date
     /** 目标桶数（降采样点数）：默认 1000，上限 10000 */
     buckets?: number
   }

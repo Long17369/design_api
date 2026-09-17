@@ -30,7 +30,7 @@ const ctx = (
   d_no: D_NO,
   data: {
     d_no: D_NO,
-    timestamp: '2026-09-12 10:00:00',
+    timestamp: new Date('2026-09-12T10:00:00'),
     wen_du1: '20',
     wen_du2: tempOut,
     jia_re: '0',

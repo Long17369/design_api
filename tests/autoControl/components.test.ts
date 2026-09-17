@@ -30,7 +30,7 @@ const newState = (): DeviceState => ({
 
 const frame = (over: Partial<WsData> = {}): WsData => ({
   d_no: 'D1',
-  timestamp: '2026-09-12 10:00:00',
+  timestamp: new Date('2026-09-12T10:00:00'),
   wen_du1: '20',
   wen_du2: '30',
   jia_re: '1',

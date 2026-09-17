@@ -79,10 +79,10 @@ declare module '@modules/sensorModule' {
   interface FlowTotalQuery {
     /** 设备编号 */
     d_no: string
-    /** 起算时刻（'YYYY-MM-DD HH:mm:ss'） */
-    start?: string
-    /** 截止时刻（'YYYY-MM-DD HH:mm:ss'） */
-    end?: string
+    /** 起算时刻 */
+    start?: Date
+    /** 截止时刻 */
+    end?: Date
   }
 
   /** 设备上报轨迹（离线监控用） */

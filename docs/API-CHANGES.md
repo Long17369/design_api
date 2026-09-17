@@ -12,9 +12,13 @@
 - 资源名（每个资源 = 数据表 + 字段映射表）：
   `sensor`（传感器数据）/ `behavior`（行为数据）/ `error`（故障告警）/ `control`（控制记录）
 - 历史图表：`GET /api/{sensor|behavior|error|control}/chart?d_no=&start=&end=&buckets=`
-  - `start`/`end` 必填，格式 `YYYY-MM-DD HH:mm:ss`（`+`/`%20` 编码空格均可）
+  - `start`/`end` 必填，JSON 形式时间（ISO 8601，如 `2026-09-12T00:00:00.000Z`；URL 编码即可）
   - `buckets` 可选（默认 1000，上限 10000）：时间桶数 = 期望点数，步长 = 总时长/桶数（向上取整，最小 1s）
-  - 返回：`[{ c_time, field1..fieldN }]`（各桶内数值列 AVG，空桶为 null；`c_time` 取桶内最大时间）
+  - 返回：`[{ c_time, field1..fieldN }]`（各桶内数值列 AVG，空桶为 null；`c_time` 取桶内最大时间，ISO 8601 UTC 字符串）
+- **时间字段出网形态**：`c_time` / `minTime` / `maxTime` / `start` / `end` 以及 WS 的 `timestamp`
+  一律是 **ISO 8601 UTC** 字符串（后端内部是 `Date`，`JSON.stringify` 自动转 UTC；前端按需本地化）
+- **时间入参形态**：JSON 形式时间（ISO 8601，即 `JSON.stringify(new Date())` 的输出）——
+  `start` / `end` 与时间列的 `where` 条件值都按 `Date` 解析后再与库中值比较
 - WebSocket：`ws://<host>:<port>/api/ws`（**后端固定该路径**，与 HTTP 的 `/api` 前缀对齐；
   其它路径的 upgrade 直接返回 HTTP 400，`?goal=` 查询参数照常可用）；
   契约直接给出连接：`const ws = connectWebSocket(goal?)` —— **返回连接实例**
@@ -54,12 +58,12 @@
 // 集合
 { "d_no": { "operator": "in", "value": ["DEV1", "DEV2"] } }
 // 区间
-{ "c_time": { "operator": "between", "value": ["2026-09-01 00:00:00", "2026-09-02 00:00:00"] } }
+{ "c_time": { "operator": "between", "value": ["2026-09-01T00:00:00.000Z", "2026-09-02T00:00:00.000Z"] } }
 // 空值（不带 value）
 { "field1": { "operator": "is null" } }
 // 同一列多条件（时间区间）→ AND
-{ "c_time": [{ "operator": ">=", "value": "2026-09-01 00:00:00" },
-             { "operator": "<=", "value": "2026-09-02 00:00:00" }] }
+{ "c_time": [{ "operator": ">=", "value": "2026-09-01T00:00:00.000Z" },
+             { "operator": "<=", "value": "2026-09-02T00:00:00.000Z" }] }
 ```
 
 ## 接口对照（旧前端实际调用过）
@@ -79,7 +83,8 @@
 ## WS 消息要点（与旧实现差异）
 
 - `data`：每帧上报的实时数据（字段同 `WsData`：`d_no/timestamp/wen_du1/wen_du2/jia_re/shui_beng/liu_liang1/liu_liang2/pressure/heat_rate/avg_flow`）
-- `alarm`：`id` 形如 `alarm_${d_no}_${c_time}`（**用于重连去重**，补推与首次推送 id 相同）；`type='reset'` 表示复位事件（前端应清除该设备横幅）
+- `alarm`：`id` 形如 `alarm_${d_no}_${毫秒时间戳}`（**用于重连去重**，补推与首次推送 id 相同）；
+  `timestamp` 为 ISO 8601 UTC 字符串；`type='reset'` 表示复位事件（前端应清除该设备横幅）
 - `direct`：指令变更通知（`{d_no, config_id, value?, success, source?, error?}`）—— `success=false` 时前端可弹错误提示
 - `lock`：保护锁状态变更（`{d_no, locked, active[], type?, reason?, expiresAt?, timestamp}`）——
   `active` 为当前仍有效的锁类型（`blocked`/`overpressure`/`pump_idle`，空数组=已解锁；`leak` 为预留类型，当前不会出现）；
@@ -397,7 +402,7 @@ UPDATE sensor_data SET field7 = NULL WHERE field7 IN (65535, 6553.5);  -- pressu
   | ------------ | ------------------------------------------------------------------------------- | ---------------------------------------- |
   | `heat_rate`  | 窗口内的**落库帧**（不含本帧 ⇒ 约滞后一帧）；重启后有历史即可得                 | 进程内窗口（含本帧）；重启后需等窗口填满 |
   | `avg_flow`   | 同上                                                                            | 同上                                     |
-  | `liu_liang1` | **最新落库帧的累计值 + 本帧流量 × 间隔**（间隔封顶 `max_gap_seconds`，首帧不计） | 进程内累加，启动时从最后落库帧续算       |
+  | `liu_liang1` | **最新落库帧的累计值 + 本帧流量 × 间隔**（间隔封顶 `max_gap_seconds`，首帧不计）| 进程内累加，启动时从最后落库帧续算       |
 
 - 两者共同点：累计流量都**以库中最新落库帧为基准**，重启不归零；落库列由
   `sensor_data_mapper` 的 `api_name`（`liu_liang1` / `flow_rate` / `temp_out`）决定。
@@ -405,10 +410,10 @@ UPDATE sensor_data SET field7 = NULL WHERE field7 IN (65535, 6553.5);  -- pressu
 
 #### 新增接口：流量总计查询 / 清零
 
-| 接口                                        | 说明                                                                                                                                                                                                                                    |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/sensor/flow/total?d_no&start&end` | 按落库帧积分得到的流量总计（L）。`start`/`end` 可选（`'YYYY-MM-DD HH:mm:ss'`）：不传 `start` = 从该设备最早落库时刻起算，不传 `end` = 算到最新落库时刻；返回 `{ d_no, start, end, total }`（无数据时 `start`/`end` 为 `null`、`total` 为 `"0"`） |
-| `POST /api/sensor/flow/reset`               | body `{ d_no }`（必填）：清零该设备累计流量 —— 内存累计态归零 + **最新落库帧的累计值改写为 0**（不新增行）；返回 `{ devices }`（无内存态也无落库帧的设备不出现在其中）                                                                     |
+| 接口                                        | 说明                                                                                                                                                                                                                                             |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /api/sensor/flow/total?d_no&start&end` | 按落库帧积分得到的流量总计（L）。`start`/`end` 可选（JSON 形式时间）：不传 `start` = 从该设备最早落库时刻起算，不传 `end` = 算到最新落库时刻；返回 `{ d_no, start, end, total }`（无数据时 `start`/`end` 为 `null`、`total` 为 `"0"`） |
+| `POST /api/sensor/flow/reset`               | body `{ d_no }`（必填）：清零该设备累计流量 —— 内存累计态归零 + **最新落库帧的累计值改写为 0**（不新增行）；返回 `{ devices }`（无内存态也无落库帧的设备不出现在其中）                                                                           |
 
 - 契约：前端可直接用 `src/types/api.ts` 的 `getFlowTotal(d_no, start?, end?)` 与 `resetFlow(d_no)`。
 - CLI：`flow <设备编号>`（清零指定设备）、`flowall`（清零所有设备），短名 `f` / `fa`。
@@ -442,10 +447,10 @@ UPDATE sensor_data SET field7 = NULL WHERE field7 IN (65535, 6553.5);  -- pressu
   「整窗持续加热 + 温度不涨」正好只命中真正的干烧。
 - **配置项变化**（按惯例需手工迁移：seeds 只补缺失行、**不删不覆盖**）：
 
-  | 配置项                  | 变化                                                                 |
-  | ----------------------- | -------------------------------------------------------------------- |
-  | `dry_burn_temp_sensor`  | **新增**：单选 `出水:out|进水:in`（默认 `out`），由 seeds 启动时自动补 |
-  | `dry_burn_heat_rate`    | **删除**：判据不再需要速度阈值（`heat_rate_window` 也不再参与干烧判定） |
+  | 配置项                  | 变化                                                                     |
+  | ----------------------- | ------------------------------------------------------------------------ |
+  | `dry_burn_temp_sensor`  | **新增**：单选 `出水:out\|进水:in`（默认 `out`），由 seeds 启动时自动补  |
+  | `dry_burn_heat_rate`    | **删除**：判据不再需要速度阈值（`heat_rate_window` 也不再参与干烧判定）  |
   | `dry_burn_seconds`      | 语义变为「干烧判定窗口（= 需要持续加热的时长）」，取值/默认值不变（15s） |
 
   老库迁移（**先删子行再删父行**；新行由 seeds 自动补）：
@@ -461,3 +466,41 @@ UPDATE sensor_data SET field7 = NULL WHERE field7 IN (65535, 6553.5);  -- pressu
   手动复位后条件仍成立可再次判定。
 - 前端只影响配置页：`dry_burn_enabled` 下少一个输入框（干烧判定加热速度）、多一个单选框
   （干烧判定温度信号），无需改代码。
+
+### 2026-09-17：数据库时间统一走 mysql2 默认行为（全链路 `Date`，去手工解析）
+
+**行为变化**：数据库不再配置连接时区，时间在「出入库」两端统一用 `Date`。
+
+- **连接**：`database.timezone` 保留（schema 默认 `'Z'` → `'local'`），原样交给驱动；不再 `SET time_zone`。
+- **写库**：`Date` 直接入库（驱动按本机时区序列化为 `DATETIME` 字面量）——
+  `error_msg.c_time`（告警）、`control_log.c_time`（控制记录：自动/手动/设备同步/复位）、
+  `direct`/`device_locks` 的 `c_time`、`sensor_data.c_time`（由 MQTT 上报的 `time` 解析而来）
+  全部改传 `Date`；删掉手工拼字符串的 `core/utils::formatNow()`。
+- **读库**：`Date` 直接出库 —— `Database.timeRange` 去掉 `DATE_FORMAT`（改回 `MIN/MAX(c_time)`，
+  返回 `Date`）；`buildChartSQL` 桶标签改回 `MAX(c_time)`（返回 `Date`）；
+  删掉 `alarmModule::formatDateTime()`（原先用 `getUTC*` 手工还原字面量）。
+- **入参**：HTTP 侧时间一律用 **JSON 形式**（ISO 8601）—— `start`/`end`（图表、流量总计）与
+  时间列的 `where` 条件值都解析成 `Date` 再进 DB 层，与库中值走同一套换算；
+  内部时间条件（窗口起点、图表时间段）也直接传 `Date`
+  （契约 `types.ts` 的 `WhereValue` 因此放宽为 `string | Date`）。
+- **出参**：`Date` 经 `JSON.stringify` 自动变成 **ISO 8601 UTC** 字符串 —— 覆盖
+  `/api/{source}/data` 与 `/chart` 的 `c_time`、`/time-range` 的 `minTime`/`maxTime`、
+  `/api/sensor/flow/total` 的 `start`/`end`，以及 WS 的 `data.timestamp`、`alarm.timestamp`、
+  `lock.timestamp`。**这是本次唯一的前端可见变化**：原先这些字段是 `'YYYY-MM-DD HH:mm:ss'`
+  墙钟文本，现在是 ISO 8601 UTC（二者代表**同一时刻**，前端本地化后显示不变）。
+- **告警去重 id**：由 `alarm_${d_no}_${'YYYY-MM-DD HH:mm:ss'}` 改为
+  `alarm_${d_no}_${毫秒时间戳}`。为保证「首次推送 = 重连补推」，时间在写库前**截断到秒**
+  （`core/utils::nowSecond()`）—— 库列是 `DATETIME`（无小数秒），带毫秒写入会被 MySQL
+  **四舍五入**，读回可能比写入大 1 秒，id 就对不上了（前端会重复弹横幅）。
+- **存量数据无需迁移**：库中 `c_time` 一直是**本机墙钟**字面量（旧实现写库即本机墙钟，
+  连接时区只影响读回解析），改成本机时区解析后，同一字面量读回的 `Date` 正是写入时的那个时刻。
+- 用例：`tests/core/chart.test.ts`、`tests/core/where.test.ts`（Date 条件值）、
+  `tests/sensorModule/derive.test.ts`、`tests/alarmModule/sendAlarm.test.ts`；
+  E2E：`tests/e2e/chart.mjs`（断言 ISO 出网）、`tests/e2e/flow_db.mjs`、`tests/e2e/blocked_bus.ts`；
+  往返探针 `tmp/check_c_time_roundtrip.mjs`（验证「截断到秒 ⇒ 写入/读回完全一致」）。
+
+### 2026-09-17：`GET /api/{source}/time-range` 的 `minTime`/`maxTime` 改回 `Date`
+
+`2026-09-16` 曾把两者改成库侧 `DATE_FORMAT` 输出的 `'YYYY-MM-DD HH:mm:ss'` 文本（为规避
+当时连接时区 `'Z'` 下的驱动换算）。连接时区改走 mysql2 默认（本机）后，该规避不再需要：
+恢复为 `MIN/MAX(c_time)` 直出 `Date`，出网即 ISO 8601 UTC（见上一条）。取值语义不变。

@@ -112,16 +112,18 @@ const check = (name, cond) => {
   console.log(`${cond ? '✅' : '❌'} ${name}`)
 }
 const points = result.phase1.body?.data ?? []
+/** 本机墙钟字符串 → 接口返回形态（`Date` 出网即 ISO 8601 UTC） */
+const iso = (local) => new Date(local.replace(' ', 'T')).toISOString()
 check('① 返回 2 个时间桶', result.phase1.status === 200 && points.length === 2)
 check(
   '① 桶 1：c_time 取桶内最大、field3=2、field5=200',
-  points[0]?.c_time === '2026-09-12 00:00:08' &&
+  points[0]?.c_time === iso('2026-09-12 00:00:08') &&
     Number(points[0]?.field3) === 2 &&
     Number(points[0]?.field5) === 200,
 )
 check(
   '① 桶 2：c_time=00:00:19、field3=20、field5=2000',
-  points[1]?.c_time === '2026-09-12 00:00:19' &&
+  points[1]?.c_time === iso('2026-09-12 00:00:19') &&
     Number(points[1]?.field3) === 20 &&
     Number(points[1]?.field5) === 2000,
 )

@@ -133,16 +133,16 @@ export async function getCount(source: string, where: Where = {}): Promise<DataC
  * 获取数据时间范围
  * @param source 数据源名：sensor / behavior / error / control（'data' 暂时指向 sensor）
  * @param where 查询条件
- * @returns Promise<{ minTime: string; maxTime: string }>
+ * @returns Promise<{ minTime: Date | null; maxTime: Date | null }>（JSON 出网时为 ISO 8601 字符串）
  */
 export async function getTimeRange(
   source: string,
   where: Where = {},
-): Promise<{ minTime: string; maxTime: string }> {
+): Promise<{ minTime: Date | null; maxTime: Date | null }> {
   const queryString = new URLSearchParams({
     where: JSON.stringify(where),
   })
-  return fetchApi<{ minTime: string; maxTime: string }>(
+  return fetchApi<{ minTime: Date | null; maxTime: Date | null }>(
     `${API_BASE}/${resolveSource(source)}/time-range?${queryString}`,
   )
 }

@@ -61,7 +61,7 @@ const cfg = buildAutoConfig(defaults)
 // 温度恒定（不上升）：干烧场景下加热投进去但温度不涨
 const frame = (heat: '0' | '1'): WsData => ({
   d_no: D_NO,
-  timestamp: '2026-09-16 10:00:00',
+  timestamp: new Date('2026-09-16T10:00:00'),
   wen_du1: '20',
   wen_du2: '30',
   jia_re: heat,

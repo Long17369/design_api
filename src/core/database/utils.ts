@@ -1,15 +1,13 @@
 import { log } from '@core/logger'
 import {
   DataQueryParams,
-  Where,
-  WhereCondition,
   WHERE_OPERATORS_MULTI_VALUE,
   WHERE_OPERATORS_NO_VALUE,
   WHERE_OPERATORS_PAIR_VALUE,
   WHERE_OPERATORS_SINGLE_VALUE,
 } from '@/types/types'
 import { ChartQueryParams, TableInfoBuilded } from '@core/database'
-import { ColumnInfo, TableInfo } from '@core/database/tables'
+import { ColumnInfo, ColumnTypeDateTime, TableInfo } from '@core/database/tables'
 import { SqlValue } from './tables'
 
 const logger = log.getLogger('Database')
@@ -171,56 +169,86 @@ const MULTI_VALUE_OPERATORS = new Set<string>(WHERE_OPERATORS_MULTI_VALUE)
 const PAIR_VALUE_OPERATORS = new Set<string>(WHERE_OPERATORS_PAIR_VALUE)
 const NO_VALUE_OPERATORS = new Set<string>(WHERE_OPERATORS_NO_VALUE)
 
-/** 运行时形态：条件可能来自 JSON，只有 operator 一定是字符串 */
-interface RawCondition {
+/**
+ * SQL 层条件值：对外（HTTP `where`）恒为字符串；内部时间条件（图表时间段、窗口起点）
+ * 可直接传 `Date`，由驱动按本机时区序列化为 `DATETIME` 字面量。
+ */
+type SqlConditionValue = string | Date
+
+/** SQL 层条件（结构同契约 `Where`，但条件值放宽为 `unknown`） */
+export interface SqlWhereCondition {
   operator: string
   value?: unknown
 }
 
-/** 条件值归一化为字符串数组（单值 → 1 元数组） */
-function toValueList(value: unknown): string[] {
+/** SQL 层 WHERE（列名 → 单个/多个条件） */
+export type SqlWhere = Record<string, SqlWhereCondition | SqlWhereCondition[]>
+
+/** 条件值是否合法（字符串，或内部时间条件用的 Date） */
+function isConditionValue(value: unknown): value is SqlConditionValue {
+  return typeof value === 'string' || value instanceof Date
+}
+
+/** 条件值归一化为数组（单值 → 1 元数组） */
+function toValueList(value: unknown): SqlConditionValue[] {
   const items = Array.isArray(value) ? value : value === undefined ? [] : [value]
   return items.map((item) => {
-    if (typeof item !== 'string') {
-      throw new Error('条件值必须是字符串或字符串数组')
+    if (!isConditionValue(item)) {
+      throw new Error('条件值必须是字符串或日期')
     }
     return item
   })
 }
 
+/**
+ * 条件值 → SQL 参数：时间列的字符串条件值（HTTP 传入的 JSON 形式时间）能解析成时间就转成 `Date`，
+ * 交由驱动按连接时区序列化（否则会与库中墙钟字面量差一个时区）；解析不了则原样传给库侧。
+ */
+function toSqlParam(value: SqlConditionValue, dateColumn: boolean): SqlValue {
+  if (!dateColumn || value instanceof Date) return value
+  const at = new Date(value)
+  return Number.isNaN(at.getTime()) ? value : at
+}
+
 /** 单个条件 → SQL 片段 + 参数；操作符只用于查分组表，值一律走 `?` 占位符 */
 function buildConditionSQL(
   column: string,
-  condition: WhereCondition,
+  condition: SqlWhereCondition,
+  dateColumn: boolean,
 ): { sql: string; params: SqlValue[] } {
-  const raw: RawCondition = condition
-  const operator = raw.operator
+  const operator = condition.operator
   const keyword = operator.toUpperCase()
   const col = quote(column)
 
   if (NO_VALUE_OPERATORS.has(operator)) {
     return { sql: `${col} ${keyword}`, params: [] }
   }
-  // 单值操作符只接受字符串（数组是集合/区间的写法）
+  // 单值操作符只接受单个值（数组是集合/区间的写法）
   if (SINGLE_VALUE_OPERATORS.has(operator)) {
-    if (typeof raw.value !== 'string') {
-      throw new Error(`${operator} 需要 1 个字符串条件值`)
+    if (!isConditionValue(condition.value)) {
+      throw new Error(`${operator} 需要 1 个条件值`)
     }
-    return { sql: `${col} ${keyword} ?`, params: [raw.value] }
+    return { sql: `${col} ${keyword} ?`, params: [toSqlParam(condition.value, dateColumn)] }
   }
-  const values = toValueList(raw.value)
+  const values = toValueList(condition.value)
   if (PAIR_VALUE_OPERATORS.has(operator)) {
     const [low, high] = values
     if (values.length !== 2 || low === undefined || high === undefined) {
       throw new Error(`${operator} 需要恰好 2 个条件值`)
     }
-    return { sql: `${col} ${keyword} ? AND ?`, params: [low, high] }
+    return {
+      sql: `${col} ${keyword} ? AND ?`,
+      params: [toSqlParam(low, dateColumn), toSqlParam(high, dateColumn)],
+    }
   }
   if (MULTI_VALUE_OPERATORS.has(operator)) {
     if (values.length === 0) {
       throw new Error(`${operator} 至少需要 1 个条件值`)
     }
-    return { sql: `${col} ${keyword} (${values.map(() => '?').join(', ')})`, params: [...values] }
+    return {
+      sql: `${col} ${keyword} (${values.map(() => '?').join(', ')})`,
+      params: values.map((value) => toSqlParam(value, dateColumn)),
+    }
   }
 
   logger.error(`列 ${column} 使用了不支持的操作符 ${operator}`)
@@ -230,7 +258,7 @@ function buildConditionSQL(
 /** 构建 WHERE 子句与参数（多条件用 AND 连接；同一列的多个条件按数组顺序拼接） */
 export function buildWhereSQL(
   info: TableInfoBuilded,
-  where: Where,
+  where: SqlWhere,
 ): { sql: string; params: SqlValue[] } {
   const clauses: string[] = []
   const params: SqlValue[] = []
@@ -242,7 +270,11 @@ export function buildWhereSQL(
     }
     for (const cond of Array.isArray(condition) ? condition : [condition]) {
       if (cond === undefined) continue
-      const built = buildConditionSQL(column, cond)
+      const built = buildConditionSQL(
+        column,
+        cond,
+        info.columns.get(column)?.type instanceof ColumnTypeDateTime,
+      )
       clauses.push(built.sql)
       params.push(...built.params)
     }
@@ -324,9 +356,9 @@ export function buildQuerySQL(
 
 /**
  * 计算图表聚合的时间桶步长（秒）：总时长 / 目标桶数，向上取整，最小 1 秒。
- * 时间非法（无法解析 / start >= end）时退化为 1 秒（相当于不降采样）。
+ * 时间非法（`Date` 无效 / start >= end）时退化为 1 秒（相当于不降采样）。
  */
-export function resolveChartStep(start: string, end: string, buckets?: number): number {
+export function resolveChartStep(start: Date, end: Date, buckets?: number): number {
   const target = Math.max(
     1,
     Math.min(
@@ -334,7 +366,7 @@ export function resolveChartStep(start: string, end: string, buckets?: number): 
       MAX_CHART_BUCKETS,
     ),
   )
-  const totalSeconds = (Date.parse(end) - Date.parse(start)) / 1000
+  const totalSeconds = (end.getTime() - start.getTime()) / 1000
   if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return 1
   return Math.max(1, Math.ceil(totalSeconds / target))
 }
@@ -345,6 +377,8 @@ export function resolveChartStep(start: string, end: string, buckets?: number): 
  *
  * 与旧实现（`mysql_node_api` 的 `getChartData`）保持一致：
  * `GROUP BY FLOOR(UNIX_TIMESTAMP(c_time) / step)`；额外支持附加 `where`（d_no 等）。
+ * 桶标签直接取 `MAX(c_time)`（`Date`），不再库侧 `DATE_FORMAT` —— 时间段入参也是 `Date`，
+ * 与库里值走同一套 mysql2 本机时区换算。
  */
 export function buildChartSQL(
   info: TableInfoBuilded,
@@ -356,23 +390,19 @@ export function buildChartSQL(
   }
   const step = resolveChartStep(params.start, params.end, params.buckets)
 
-  const conditions: Where = {
+  const conditions: SqlWhere = {
     ...(params.where ?? {}),
     c_time: [
       { operator: '>=', value: params.start },
       { operator: '<=', value: params.end },
-    ] satisfies WhereCondition[],
+    ],
   }
   const { sql: whereSQL, params: whereParams } = buildWhereSQL(info, conditions)
 
   // 数据列（field1..N）按桶取平均；无可聚合列时只返回桶时间
   const fields = [...info.columns.keys()].filter((name) => CHART_FIELD_PATTERN.test(name))
   const averages = fields.map((name) => `AVG(${quote(name)}) AS ${quote(name)}`)
-  const selectList = [
-    `DATE_FORMAT(MAX(${quote('c_time')}), '%Y-%m-%d %H:%i:%s') AS ${quote('c_time')}`,
-  ]
-    .concat(averages)
-    .join(', ')
+  const selectList = [`MAX(${quote('c_time')}) AS ${quote('c_time')}`].concat(averages).join(', ')
 
   const sql =
     `SELECT ${selectList} FROM ${quote(info.name)}${whereSQL}` +

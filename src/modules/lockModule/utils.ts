@@ -1,4 +1,4 @@
-import { formatNow } from '@core/utils'
+import { nowSecond } from '@core/utils'
 import { DeviceLock, LockSnapshot, LockTarget, LockType } from '@core/locks'
 import { SqlValue } from '@core/database/tables'
 import { DataQueryParams, Where } from '@/types/types'
@@ -44,7 +44,7 @@ export function toLockRow(lock: DeviceLock): Record<string, SqlValue> {
     deny: JSON.stringify(lock.deny),
     snapshot: lock.snapshot ? JSON.stringify(lock.snapshot) : null,
     expires_at: lock.expiresAt !== undefined ? String(lock.expiresAt) : null,
-    c_time: formatNow(),
+    c_time: nowSecond(),
   }
 }
 

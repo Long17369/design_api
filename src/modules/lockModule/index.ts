@@ -3,7 +3,6 @@ import { log } from '@core/logger'
 import { Closable } from '@core/lifecycle'
 import { Database } from '@core/database'
 import { DeviceLock, LockChange, LockType, lockManager } from '@core/locks'
-import { formatNow } from '@core/utils'
 import { WsClientConnected } from '@gateways/websocket'
 import { WsDirectUpdate, WsLock, WsMessage } from '@/types/types'
 import { DeviceLockRow } from '.'
@@ -162,7 +161,7 @@ export class LockModule implements Closable {
       d_no,
       locked,
       active: [...active],
-      timestamp: formatNow(),
+      timestamp: new Date(),
       ...(lock?.type !== undefined ? { type: lock.type } : {}),
       ...(lock?.reason !== undefined ? { reason: lock.reason } : {}),
       ...(lock?.expiresAt !== undefined ? { expiresAt: lock.expiresAt } : {}),

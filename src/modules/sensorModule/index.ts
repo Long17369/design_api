@@ -22,7 +22,6 @@ import {
   calcHeatRate,
   dbColumn,
   fmt,
-  formatTime,
   hasSpike,
   integrateBuckets,
   intOr,
@@ -250,7 +249,7 @@ export class SensorModule implements Closable {
     const flowColumn = dbColumn(mapper, 'flow_rate')
     const tempColumn = dbColumn(mapper, 'temp_out')
     const windowSec = Math.max(config.heatRateWindow, config.avgFlowWindow)
-    // 窗口起点按落库同一种写法（'YYYY-MM-DD HH:mm:ss'）交给库侧比较，不在 Node 侧做时区换算
+    // 窗口起点直接用 `Date`：与 c_time 走同一套 mysql2 本机时区换算，库侧比较
     const columns = ['c_time', totalColumn, flowColumn, tempColumn].filter(
       (column): column is string => column !== null,
     )
@@ -259,7 +258,7 @@ export class SensorModule implements Closable {
       columns,
       where: {
         d_no: { operator: '=', value: raw.id },
-        c_time: { operator: '>=', value: formatTime(now - windowSec * 1000) },
+        c_time: { operator: '>=', value: new Date(now - windowSec * 1000) },
       },
       orderBy: 'id',
       order: 'DESC',
@@ -321,15 +320,15 @@ export class SensorModule implements Closable {
     const range = await db.timeRange('sensor_data', {
       d_no: { operator: '=', value: query.d_no },
     })
-    // `timeRange` 返回库侧格式化的 'YYYY-MM-DD HH:mm:ss'，可直接作为积分区间
+    // `timeRange` 返回 `Date`，可直接作为积分区间
     const start = query.start ?? range.minTime
     const end = query.end ?? range.maxTime
-    if (start === null || end === null || parseTime(end) < parseTime(start)) {
+    if (start === null || end === null || end.getTime() < start.getTime()) {
       return { d_no: query.d_no, start, end, total: fmt(0) }
     }
 
     // 桶宽最细 1 秒（范围内秒数 > 桶数上限时自动放宽），桶内取瞬时流量均值做积分
-    const seconds = Math.max(1, Math.round((parseTime(end) - parseTime(start)) / 1000))
+    const seconds = Math.max(1, Math.round((end.getTime() - start.getTime()) / 1000))
     const buckets = Math.min(BUCKET_LIMIT, seconds)
     const points = await db.chart('sensor_data', {
       where: { d_no: { operator: '=', value: query.d_no } },
@@ -338,8 +337,8 @@ export class SensorModule implements Closable {
       buckets,
     })
     const samples = points.map((point) => ({
-      t: parseTime(point.c_time),
-      v: toNum(point[flowColumn]),
+      t: point.c_time.getTime(),
+      v: toNum(point[flowColumn] as string | number | null | undefined),
     }))
     const total = integrateBuckets(samples, {
       stepSeconds: resolveChartStep(start, end, buckets),

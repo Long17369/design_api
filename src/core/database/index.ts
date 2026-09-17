@@ -198,10 +198,9 @@ export class Database implements Closable {
    * - `waitForConnections: true` + `queueLimit: 0`：池满时**排队等待**（不报错、不丢请求）
    * —— 待有连接释放或新建后自动继续；
    * - `connectionLimit`：并发上限（配置项 `database.connection_limit`，缺省 10）；
-   * - `enableKeepAlive` + `maxIdle` / `idleTimeout`：尽早发现断链、回收空闲连接；
-   * - 每条**新建**连接都做一次会话初始化（时区），保证换连接（含断后重建）后行为一致。
+   * - `enableKeepAlive` + `maxIdle` / `idleTimeout`：尽早发现断链、回收空闲连接。
    */
-  private createPool(): mysql.Pool {
+  private createPool() {
     if (!this.config) {
       logger.error('数据库配置未设置')
       throw new Error('数据库配置未设置')
@@ -369,6 +368,7 @@ export class Database implements Closable {
     params?: SqlValue[],
     retryOnLost = false,
   ): Promise<[unknown, unknown]> {
+    logger.debug(`SQL: ${sql} | params: ${JSON.stringify(params)}`)
     try {
       return await this.runQuery(sql, params)
     } catch (err) {
@@ -441,18 +441,13 @@ export class Database implements Closable {
   /**
    * 查询 c_time 时间范围。
    *
-   * 时间一律用 `DATE_FORMAT` 在库侧格式化成 `'YYYY-MM-DD HH:mm:ss'`：驱动对 `DATETIME`
-   * 的解析受连接时区影响（会按连接时区做一次换算），而库里存的是**设备上报的墙上时钟**，
-   * 直接用驱动解析出的 `Date` 会平白多出一个时区偏移。
+   * 直接取 `MIN/MAX(c_time)`：mysql2 按**本机时区**把 `DATETIME` 解析回 `Date`，
+   * 与写入时 `Date` 的序列化互为逆运算，无需库侧 `DATE_FORMAT`。
    *
    * @param table 表名
    * @param where 查询条件
-   * @returns { minTime, maxTime }
    */
-  public async timeRange(
-    table: string,
-    where: Where = {},
-  ): Promise<{ minTime: string | null; maxTime: string | null }> {
+  public async timeRange(table: string, where: Where = {}) {
     await this.ensureReady()
     const info = findTableInfo(this.tables, table)
     if (!isColumnAllowed(info, 'c_time')) {
@@ -460,11 +455,9 @@ export class Database implements Closable {
       throw new Error(`表 ${info.name} 没有 c_time 列，无法计算时间范围`)
     }
     const { sql: whereSQL, params } = buildWhereSQL(info, where)
-    const sql =
-      `SELECT DATE_FORMAT(MIN(c_time), '%Y-%m-%d %H:%i:%s') AS minTime, ` +
-      `DATE_FORMAT(MAX(c_time), '%Y-%m-%d %H:%i:%s') AS maxTime FROM ${quote(info.name)}${whereSQL}`
+    const sql = `SELECT MIN(c_time) AS minTime, MAX(c_time) AS maxTime FROM ${quote(info.name)}${whereSQL}`
     const [rows] = await this.query(sql, params, true)
-    const row = (rows as Array<{ minTime: string | null; maxTime: string | null }>)[0]
+    const row = (rows as Array<{ minTime: Date | null; maxTime: Date | null }>)[0]
     return { minTime: row?.minTime ?? null, maxTime: row?.maxTime ?? null }
   }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { bus } from '@core/bus'
 import { AlarmDef } from '@modules/autoControl'
-import { formatDateTime, sendAlarm, toBlockAlarm } from '@modules/alarmModule/utils'
+import { sendAlarm, toBlockAlarm } from '@modules/alarmModule/utils'
 import type { WsMessage } from '@/types/types'
 
 /** 收集 WS 推送（sendAlarm 会经 bus 广播） */
@@ -36,11 +36,23 @@ describe('sendAlarm（告警类型与分类）', () => {
     stop()
 
     expect(rows[0]?.field3).toBe('block')
-    const data = events.at(-1)?.data as { type?: string; code?: string; level?: string }
+    // 落库 c_time 直接是 Date（驱动按本机时区序列化）
+    expect(rows[0]?.c_time).toBeInstanceOf(Date)
+    const cTime = rows[0]?.c_time as Date
+    const data = events.at(-1)?.data as {
+      type?: string
+      code?: string
+      level?: string
+      id?: string
+      timestamp?: Date
+    }
     expect(events.at(-1)?.event).toBe('alarm')
     expect(data.type).toBe('alarm')
     expect(data.code).toBe('pressure_zero')
     expect(data.level).toBe('error')
+    // 推送 id / timestamp 与落库时间同源（首次推送与补推 id 一致，前端才能去重）
+    expect(data.id).toBe(`alarm_D1_${cTime.getTime()}`)
+    expect(data.timestamp).toBe(cTime)
   })
 
   it('自定义 category / type / color 生效（离线告警与恢复推送）', async () => {
@@ -75,12 +87,6 @@ describe('sendAlarm（告警类型与分类）', () => {
 })
 
 describe('alarmModule 工具', () => {
-  it('时间归一化为 UTC 字面量（避免 +8h 偏移）', () => {
-    const d = new Date(Date.UTC(2026, 8, 12, 10, 20, 30))
-    expect(formatDateTime(d)).toBe('2026-09-12 10:20:30')
-    expect(formatDateTime('2026-09-12T10:20:30.000Z')).toBe('2026-09-12 10:20:30')
-  })
-
   it('组装堵塞补推告警：id 规则与字段兜底', () => {
     const d = new Date(Date.UTC(2026, 8, 12, 10, 20, 30))
     const alarm = toBlockAlarm('DEV1', {
@@ -88,9 +94,10 @@ describe('alarmModule 工具', () => {
       field1: '水管堵塞：压力归零',
       field2: 'pressure_zero',
     })
-    expect(alarm.id).toBe('alarm_DEV1_2026-09-12 10:20:30')
+    expect(alarm.id).toBe(`alarm_DEV1_${d.getTime()}`)
     expect(alarm.type).toBe('alarm')
     expect(alarm.code).toBe('pressure_zero')
+    expect(alarm.timestamp).toBe(d)
 
     const fallback = toBlockAlarm('DEV2', { c_time: d, field1: null, field2: null })
     expect(fallback.message).toBe('水管堵塞')

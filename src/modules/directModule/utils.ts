@@ -1,4 +1,5 @@
-import { formatNow } from '@core/utils'
+import { nowSecond } from '@core/utils'
+import { SqlValue } from '@core/database/tables'
 import { DirectConfigRow, SetValueParams } from '.'
 import { DataQueryParams, DirectConfig, Where } from '@/types/types'
 
@@ -164,10 +165,10 @@ export function controlLogRow(
   value: string,
   reason: string,
   source: NonNullable<SetValueParams['source']> = 'manual',
-): Record<string, string> {
+): Record<string, SqlValue> {
   return {
     d_no,
-    c_time: formatNow(),
+    c_time: nowSecond(),
     field1: source,
     field2: target,
     field3: value === '1' ? 'on' : 'off',

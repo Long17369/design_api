@@ -18,11 +18,6 @@ import { WsData } from '@/types/types'
  */
 const D_NO = 'E2E_BUS'
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-const nowStr = () => {
-  const d = new Date()
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
-}
 
 const config = new Config('@root/config.json')
 const database = new Database()
@@ -84,7 +79,7 @@ bus.onEvent('WS_MESSAGE_OUT', (push) => pushes.push(push as never))
 
 const frame = (over: Partial<WsData>): WsData => ({
   d_no: D_NO,
-  timestamp: nowStr(),
+  timestamp: new Date(),
   wen_du1: '20',
   wen_du2: '30',
   jia_re: '1',

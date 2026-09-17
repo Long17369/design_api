@@ -1,12 +1,19 @@
 /**
- * 时间工具：`formatNow()` 返回本地墙钟的 'YYYY-MM-DD HH:mm:ss'。
+ * 时间工具：全链路统一用 `Date` 表示时间。
  *
- * 用途：写库（c_time 等 DATETIME 字段）与生成前端时间戳/去重 id。
- * 读回时注意：数据库连接时区取自配置（默认 'Z' → '+00:00'），mysql2 按该时区
- * 解析 DATETIME，因此还原字面量要用 getUTC*（见 modules/alarmModule/utils.ts）。
+ * 写库时由 mysql2 按**本机时区**把 `Date` 序列化为 `DATETIME` 字面量，读回时同样按本机
+ * 时区解析回 `Date`（两者互为逆运算）⇒ 不再需要手工 `formatNow()` / `getUTC*` 还原。
  */
-export function formatNow(): string {
-  const d = new Date()
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+
+/**
+ * 当前时刻（截断到秒）。
+ *
+ * 库里的 `c_time` 是 `DATETIME`（无小数秒），而驱动序列化 `Date` 会带上毫秒，MySQL 对无
+ * 小数秒列是**四舍五入**而非截断 —— 带毫秒写入会让读回的秒比写入时大 1，导致「首次推送的
+ * id/时间戳」与「补推时按库值算出的」对不上（前端重复横幅）。统一在写库前截断到秒。
+ */
+export function nowSecond(): Date {
+  const now = new Date()
+  now.setMilliseconds(0)
+  return now
 }

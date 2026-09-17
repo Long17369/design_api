@@ -143,29 +143,29 @@ function firstQuery(raw: unknown): string | undefined {
   return undefined
 }
 
-/** 'YYYY-MM-DD HH:mm:ss'（或带 T 的 ISO 变体）：用于校验图表时间段参数 */
-const CHART_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/
+/** 时间段参数 → `Date`（JSON 形式时间，如 `2026-09-12T00:00:00.000Z`；非法抛 HttpError(400)） */
+function toDate(value: string, name: 'start' | 'end'): Date {
+  const at = new Date(value)
+  if (Number.isNaN(at.getTime())) {
+    throw new HttpError(400, 'INVALID_PARAMETER', `${name} 不是合法时间`)
+  }
+  return at
+}
 
 /** 解析并校验图表时间段参数（非法抛 HttpError(400)） */
-function parseChartTime(raw: unknown, name: 'start' | 'end'): string {
+function parseChartTime(raw: unknown, name: 'start' | 'end'): Date {
   const value = firstQuery(raw)
   if (!value) {
     throw new HttpError(400, 'INVALID_PARAMS', `缺少必填参数 ${name}`)
   }
-  if (!CHART_TIME_PATTERN.test(value)) {
-    throw new HttpError(400, 'INVALID_PARAMETER', `${name} 格式应为 YYYY-MM-DD HH:mm:ss`)
-  }
-  return value.replace('T', ' ')
+  return toDate(value, name)
 }
 
 /** 解析可选的时间段参数（不传/空串返回 undefined，非法抛 HttpError(400)） */
-function parseOptionalTime(raw: unknown, name: 'start' | 'end'): string | undefined {
+function parseOptionalTime(raw: unknown, name: 'start' | 'end'): Date | undefined {
   const value = firstQuery(raw)
   if (value === undefined || value === '') return undefined
-  if (!CHART_TIME_PATTERN.test(value)) {
-    throw new HttpError(400, 'INVALID_PARAMETER', `${name} 格式应为 YYYY-MM-DD HH:mm:ss`)
-  }
-  return value.replace('T', ' ')
+  return toDate(value, name)
 }
 
 /** 解析图表桶数（可选，默认 1000，允许范围 1..10000） */
@@ -182,7 +182,7 @@ function parseBuckets(raw: unknown): number | undefined {
 /**
  * 处理 GET /:source/chart —— 历史图表降采样数据（时间桶 AVG）。
  *
- * Query：`d_no`（可选，设备编号）、`start` / `end`（必填，'YYYY-MM-DD HH:mm:ss'）、
+ * Query：`d_no`（可选，设备编号）、`start` / `end`（必填，JSON 形式时间）、
  *        `buckets`（可选，默认 1000）、`where`（可选，JSON 过滤条件）。
  * 返回：`ChartPoint[]`（`c_time` + 各数据列平均值，按时间升序）。
  *
@@ -197,7 +197,7 @@ export async function handleChart(
   const query = (req.query ?? {}) as Record<string, unknown>
   const start = parseChartTime(query['start'], 'start')
   const end = parseChartTime(query['end'], 'end')
-  if (Date.parse(end) < Date.parse(start)) {
+  if (end.getTime() < start.getTime()) {
     throw new HttpError(400, 'INVALID_PARAMETER', 'start 不能晚于 end')
   }
 
@@ -310,7 +310,7 @@ export async function handleDataDevices(db: Database, _req: Request, res: Respon
 /**
  * 处理 GET /sensor/flow/total —— 按落库帧积分得到的流量总计（L）。
  *
- * Query：`d_no`（必填）、`start` / `end`（可选，'YYYY-MM-DD HH:mm:ss'）：
+ * Query：`d_no`（必填）、`start` / `end`（可选，JSON 形式时间）：
  * 不传 `start` 即从该设备最早的落库时刻起算，不传 `end` 即算到最新的落库时刻。
  */
 export async function handleFlowTotal(

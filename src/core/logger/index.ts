@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import * as fs from 'fs'
 import * as path from 'path'
 import * as zlib from 'zlib'
@@ -15,7 +14,7 @@ enum LogLevel {
 }
 
 /** 参数折叠成一行（自定义控制台接收器只收文本） */
-function formatArgs(args: any[]): string {
+function formatArgs(args: unknown[]): string {
   if (args.length === 0) return ''
   return ' ' + args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ')
 }
@@ -96,7 +95,7 @@ class Logger {
   }
 
   private getTimestamp(): string {
-    return new Date().toISOString()
+    return new Date().toLocaleString()
   }
 
   private getColor(level: LogLevel): string {
@@ -118,20 +117,22 @@ class Logger {
     }
   }
 
-  public async log(name: string, level: LogLevel, message: string, args: any[]): Promise<void> {
+  public async log(name: string, level: LogLevel, message: string, args: unknown[]): Promise<void> {
     const timestamp = this.getTimestamp()
     const color = this.getColor(level)
     const resetColor = '\x1b[0m'
     const levelName = LogLevel[level].padEnd(5)
 
+    const formattedMessage = `[${timestamp}] [${levelName}] [${name}] ${message}`
+
     // Console output (with colors) - Only if level meets threshold
     if (level >= this.level) {
-      const consoleMessage = `${color}[${timestamp}] [${levelName}] [${name}] ${message}${resetColor}`
+      const consoleMessage = `${color}${formattedMessage}${resetColor}`
       this.writeToConsole(consoleMessage, args, level >= LogLevel.ERROR)
     }
 
     // File output (without colors) - Always write to file
-    let fileMessage = `[${timestamp}] [${levelName}] [${name}] ${message}`
+    let fileMessage = formattedMessage
     if (args.length > 0) {
       fileMessage +=
         ' ' + args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ')
@@ -140,16 +141,14 @@ class Logger {
   }
 
   /** 控制台输出：默认走 console，被接管时交给自定义接收器（参数折进文本） */
-  private writeToConsole(message: string, args: any[], isError: boolean): void {
+  private writeToConsole(message: string, args: unknown[], isError: boolean): void {
     if (this.consoleSink) {
       this.consoleSink(message + formatArgs(args), isError)
       return
     }
     if (isError) {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       console.error(message, ...args)
     } else {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       console.log(message, ...args)
     }
   }
@@ -323,29 +322,29 @@ class NamedLogger {
     private logger: Logger,
   ) {}
 
-  public async trace(message: string, ...args: any[]): Promise<void> {
+  public async trace(message: string, ...args: unknown[]): Promise<void> {
     await this.logger.log(this.name, LogLevel.TRACE, message, args)
   }
 
-  public async debug(message: string, ...args: any[]): Promise<void> {
+  public async debug(message: string, ...args: unknown[]): Promise<void> {
     await this.logger.log(this.name, LogLevel.DEBUG, message, args)
   }
 
-  public async info(message: string, ...args: any[]): Promise<void> {
+  public async info(message: string, ...args: unknown[]): Promise<void> {
     await this.logger.log(this.name, LogLevel.INFO, message, args)
   }
 
   public log = this.info
 
-  public async warn(message: string, ...args: any[]): Promise<void> {
+  public async warn(message: string, ...args: unknown[]): Promise<void> {
     await this.logger.log(this.name, LogLevel.WARN, message, args)
   }
 
-  public async error(message: string, ...args: any[]): Promise<void> {
+  public async error(message: string, ...args: unknown[]): Promise<void> {
     await this.logger.log(this.name, LogLevel.ERROR, message, args)
   }
 
-  public async fatal(message: string, ...args: any[]): Promise<void> {
+  public async fatal(message: string, ...args: unknown[]): Promise<void> {
     await this.logger.log(this.name, LogLevel.FATAL, message, args)
   }
 }

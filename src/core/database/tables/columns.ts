@@ -1,6 +1,6 @@
 import { DataQueryParamsWithoutTable, Where } from '@/types/types'
 import { Database, TableInfoBuilded } from '@core/database'
-import { SqlValue, WriteResult } from '@core/database/tables'
+import { SqlValue } from '@core/database/tables'
 
 /** 列类型基类：记录类型名并提供建表用的 SQL 类型描述 */
 export class ColumnTypeBase {
@@ -108,32 +108,32 @@ export class TableTools {
   }
 
   /** 通用查询（列/条件/排序/分页/去重），返回行数组 */
-  public query<T = Record<string, unknown>>(params: DataQueryParamsWithoutTable): Promise<T[]> {
+  public query<T = Record<string, unknown>>(params: DataQueryParamsWithoutTable) {
     return this.database.executeQuery<T>({ table: this.tableName, ...params })
   }
 
   /** 统计本表记录数 */
-  public count(where: Where = {}): Promise<{ count: number }> {
+  public count(where: Where = {}) {
     return this.database.count(this.tableName, where)
   }
 
   /** 查询本表 c_time 时间范围 */
-  public timeRange(where: Where = {}): Promise<{ minTime: string | null; maxTime: string | null }> {
+  public timeRange(where: Where = {}) {
     return this.database.timeRange(this.tableName, where)
   }
 
   /** 新增记录（列名基于表元信息白名单校验） */
-  public insert(data: Record<string, SqlValue>): Promise<WriteResult> {
+  public insert(data: Record<string, SqlValue>) {
     return this.database.insert(this.tableName, data)
   }
 
   /** 按条件更新记录 */
-  public update(data: Record<string, SqlValue>, where: Where): Promise<WriteResult> {
+  public update(data: Record<string, SqlValue>, where: Where) {
     return this.database.update(this.tableName, data, where)
   }
 
   /** 按条件删除记录（必须提供条件，禁止全表删除） */
-  public delete(where: Where): Promise<WriteResult> {
+  public delete(where: Where) {
     return this.database.delete(this.tableName, where)
   }
 }

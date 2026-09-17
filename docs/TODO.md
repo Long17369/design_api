@@ -230,15 +230,21 @@
   - database 口径：加热速度/平均水流按窗口内落库帧算（约滞后一帧）；流量总计 = 最新落库帧累计值 + 本帧流量 × 间隔（封顶 `max_gap_seconds`，首帧不计 ⇒ 重启不凭空补流量）；每帧一次查询（主键倒序扫描）
   - memory 口径保留原行为（进程内滑窗 + 累加，启动时从最后落库帧续算）
   - 新增接口：`GET /api/sensor/flow/total?d_no&start&end`（落库帧时间桶积分，缺桶断点按 `max_gap_seconds` 封顶）、`POST /api/sensor/flow/reset {d_no}`（内存累计态归零 + 改写最新落库帧累计值为 0）；契约 `api.ts::getFlowTotal/resetFlow`；CLI `flow <d_no>` / `flowall`
-  - 顺带修正：`Database.timeRange` 改为库侧 `DATE_FORMAT` 返回时间文本（原先驱动按连接时区换算，比库里的墙上时钟多一个时区偏移）
+  - 顺带修正：`Database.timeRange` 曾改为库侧 `DATE_FORMAT` 返回时间文本（规避当时的连接时区换算）；2026-09-17 起连接时区改走 mysql2 默认（本机），该处已改回 `MIN/MAX(c_time)` 直出 `Date`
   - 用例：`tests/sensorModule/derive.test.ts`、`tests/e2e/flow_db.mjs`（库/内存两种口径各跑一遍）
 
 ## 数据库与配置（`core/database/`、`core/config/`）
 
 - [x] 统一操作接口（`query`/`executeQuery`/`count`/`timeRange`/`insert`/`update`/`delete`）+ 表列白名单
+- [x] **数据库时间统一走 mysql2 默认行为（全链路 `Date`）**（2026-09-17）：`database.timezone` 保留（默认 `'local'`），删掉 `SET time_zone`；读写时间全用 `Date`
+  - 写库一律传 `Date`（`error_msg`/`control_log`/`direct`/`device_locks`/`sensor_data` 的 `c_time`；删 `core/utils::formatNow()`）
+  - 读库一律得 `Date`（`timeRange` 去 `DATE_FORMAT`、图表桶标签 `MAX(c_time)`；删 `alarmModule::formatDateTime()`）
+  - 出网即 ISO 8601 UTC（`JSON.stringify`）；入参 `start`/`end` 仍按本机墙钟字符串解析成 `Date`
+  - 告警去重 id 改为 `alarm_${d_no}_${毫秒时间戳}`，写库前截断到秒（`nowSecond()`）保证「首次推送 = 补推」
+  - 存量 `c_time` 本就是本机墙钟字面量 ⇒ **无需迁移**；详见 `docs/API-CHANGES.md`
 - [x] 自动建库建表、`information_schema` + `SHOW COLUMNS` 增量补列
 - [x] `seeds` 幂等初始化（只补缺失、不覆盖删除）；「列定义 + 值行」列表形式（490 → 147 行）
-- [x] 配置加载：`fs.readFileSync` + `JSON.parse` + Ajv（`useDefaults`，`timezone` 默认 `'Z'`）
+- [x] 配置加载：`fs.readFileSync` + `JSON.parse` + Ajv（`useDefaults`，`timezone` 默认 `'local'`）
 - [x] 缓存 key 规范与清单：`@core/cache` 只提供通用能力（KV + TTL + tag 失效），**key 由使用它的模块自己定义**（不在 core 集中登记）；命名 `<模块>:<用途>`、`tag` 必须等于来源表名；清单与编码规范见 `docs/CACHE.md`
 - [x] seeds 一致性自检：`tests/e2e/verify_seeds.ts` 逐表逐列比对「seeds 定义 vs 库中现有行」（输出 `SEEDS_EQUIVALENT_OK`）；借此发现并修掉 `sensor_spike_*` 的 `order` 漂移（新增开关行后原 4 行未后移，出现重复 21 号）——seeds 只补不覆盖，改既有行定义必须手工迁移（SQL 见 `docs/API-CHANGES.md` 升级须知）
 - [x] 累计流量持久化（已实现）：进程启动后首次上报时，从该设备**最后一条落库帧**（mapper 中 `api_name='liu_liang1'` 对应列，默认 `field5`）恢复累计值 → 重启不再归零（日志「`累计流量已恢复: <d_no> = <N>L`」）；无历史数据则从 0 开始
