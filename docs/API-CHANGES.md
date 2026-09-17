@@ -537,3 +537,20 @@ UPDATE sensor_data SET field7 = NULL WHERE field7 IN (65535, 6553.5);  -- pressu
 - WS 推送不变：仍按缺测推**空串**（`toStr(null)` → `''`），前端与自动控制无需改动
 - 存量数据无需迁移：该列在库中本来就是 NULL（见 2026-09-15 的清理 SQL）
 
+### 2026-09-17：加热开关 / 水泵状态 补值映射（`sensor_data_mapper.mapping`，0=关 / 1=开）
+
+`sensor_data_mapper` 的 `mapping`（值映射词表，JSON：值 → 显示名）此前全为 NULL，数据表里
+`加热开关`(`field3`) / `水泵状态`(`field4`) 只能看到 0 / 1；现补上词表：
+
+```sql
+-- 既有库需回填一次（seeds 只补缺失行、不覆盖）
+UPDATE sensor_data_mapper SET mapping = '{"0":"关","1":"开"}'
+  WHERE api_name IN ('heat_Y1','water_Y2');
+```
+
+- 词表随 `GET /api/{source}/table` 下发；前端 `ControlLogView` 已按 `mapping` 渲染单元格，
+  数据页 / 实时表格还需把 `mapping` 接到列定义上（后端接口不变）
+- 与 `direct_config` 的 `关:0|开:1`（控制面板）口径一致
+- 自检：`pnpm exec tsx tests/e2e/verify_seeds.ts`（本机 2026-09-17 已回填，`sensor_data_mapper`
+  无差异）
+
