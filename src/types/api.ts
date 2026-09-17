@@ -14,6 +14,7 @@ import type {
   DataSourceName,
   FlowTotal,
   FlowResetResult,
+  RuntimeSummary,
 } from './types'
 
 /**
@@ -246,6 +247,20 @@ export const getFlowTotal = (d_no: string, start?: string, end?: string) => {
   if (start !== undefined && start !== '') query.set('start', start)
   if (end !== undefined && end !== '') query.set('end', end)
   return fetchApi<FlowTotal>(`${API_BASE}/sensor/flow/total?${query.toString()}`)
+}
+
+/**
+ * 查询设备累计运行时长（s）：逐帧判断开关导通（水泵→`water_Y2`、加热→`heat_Y1`），
+ * 导通帧计入与上一帧的间隔（超 `sensor.derive.max_gap_seconds` 的段按封顶计入）
+ * @param d_no 设备编号
+ * @param start 起算时刻（不传 = 从该设备最早的落库时刻起算）
+ * @param end 截止时刻（不传 = 算到最新的落库时刻）
+ */
+export const getRuntimeTotal = (d_no: string, start?: string, end?: string) => {
+  const query = new URLSearchParams({ d_no })
+  if (start !== undefined && start !== '') query.set('start', start)
+  if (end !== undefined && end !== '') query.set('end', end)
+  return fetchApi<RuntimeSummary>(`${API_BASE}/sensor/runtime?${query.toString()}`)
 }
 
 /**

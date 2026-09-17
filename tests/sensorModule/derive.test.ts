@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   accumulateFromBaseline,
   accumulateRunTimeFromBaseline,
+  counterRange,
   dbColumn,
   frameTime,
-  integrateBuckets,
   parseTime,
   samplesFromRows,
 } from '@modules/sensorModule/utils'
@@ -107,89 +107,23 @@ describe('库口径累计运行时长（基准帧 + 导通间隔）', () => {
     expect(accumulateRunTimeFromBaseline(30, null, true, now, 60)).toBe(30) // 重启首帧不补计
   })
 })
-
-describe('流量总计查询积分（时间桶）', () => {
-  const t = (offsetSec: number) => parseTime('2026-09-15 10:00:00') + offsetSec * 1000
-  /** 常见情形：桶宽 60s、断点封顶 60s */
-  const OPTIONS = { stepSeconds: 60, maxGapSeconds: 60 }
-
-  it('Σ 相邻桶「后一桶均值 × 两桶标签时间差」', () => {
-    // 0s→60s: 6L/min × 1min = 6；60s→120s: 12L/min × 1min = 12
-    expect(
-      integrateBuckets(
-        [
-          { t: t(0), v: 0 },
-          { t: t(60), v: 6 },
-          { t: t(120), v: 12 },
-        ],
-        OPTIONS,
-      ),
-    ).toBe(18)
+describe('累计量区间值（头尾两点相减）', () => {
+  it('尾 − 头', () => {
+    expect(counterRange(0, 15)).toBe(15)
+    expect(counterRange(12.5, 25)).toBe(12.5)
   })
 
-  it('间隔大于桶宽但未超封顶时按实际标签差计入', () => {
-    // 桶宽 1s、帧间 30s：仍算连续数据 ⇒ 12L/min × 0.5min
-    expect(
-      integrateBuckets(
-        [
-          { t: t(0), v: 6 },
-          { t: t(30), v: 12 },
-        ],
-        { stepSeconds: 1, maxGapSeconds: 60 },
-      ),
-    ).toBe(6)
+  it('头尾相同（区间内只有一帧）按 0', () => {
+    expect(counterRange(25, 25)).toBe(0)
   })
 
-  it('中间缺桶（断点）按 maxGapSeconds 封顶', () => {
-    // 缺桶 10 分钟（标签差 600s，远大于桶宽 60s）⇒ 最多计 1 分钟
-    expect(
-      integrateBuckets(
-        [
-          { t: t(0), v: 6 },
-          { t: t(600), v: 600 },
-        ],
-        OPTIONS,
-      ),
-    ).toBe(600)
+  it('任一点缺测（区间内没有带该列值的帧）按 0', () => {
+    expect(counterRange(null, 25)).toBe(0)
+    expect(counterRange(10, null)).toBe(0)
+    expect(counterRange(null, null)).toBe(0)
   })
 
-  it('桶宽大于封顶值时按封顶计入（慢速上报设备应调大 max_gap_seconds）', () => {
-    // 桶宽 60s、帧间 120s：间隔超过封顶 60s ⇒ 12L/min × 1min
-    expect(
-      integrateBuckets(
-        [
-          { t: t(0), v: 6 },
-          { t: t(120), v: 12 },
-        ],
-        OPTIONS,
-      ),
-    ).toBe(12)
-  })
-
-  it('桶内该列全缺测时跳过该段（不用别的段的值补）', () => {
-    expect(
-      integrateBuckets(
-        [
-          { t: t(0), v: 6 },
-          { t: t(60), v: null },
-          { t: t(120), v: 12 },
-        ],
-        OPTIONS,
-      ),
-    ).toBe(12)
-  })
-
-  it('桶数不足 / 时间不倒增时不产生累积', () => {
-    expect(integrateBuckets([], OPTIONS)).toBe(0)
-    expect(integrateBuckets([{ t: t(0), v: 6 }], OPTIONS)).toBe(0)
-    expect(
-      integrateBuckets(
-        [
-          { t: t(60), v: 6 },
-          { t: t(60), v: 12 },
-        ],
-        OPTIONS,
-      ),
-    ).toBe(0)
+  it('尾 < 头（区间内累计值被清零改写过）也按 0', () => {
+    expect(counterRange(100, 5)).toBe(0)
   })
 })

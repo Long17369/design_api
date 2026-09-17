@@ -136,34 +136,16 @@ export function accumulateFromBaseline(
 }
 
 /**
- * 时间桶积分：Σ 桶均值 × 该桶承担的时长。
+ * 累计量的区间值：**头尾两点相减**（尾 − 头）。
  *
- * 桶行只在桶内有落库帧时返回，故「桶承担的时长」分两种：
- * - 与上一个桶相邻（标签差 ≈ 桶宽）⇒ 取实际标签差（上报间隔大于桶宽也不少算）；
- * - 中间缺桶（标签差远大于桶宽）⇒ 该段本来是断点（停机/离线），最多按 `maxGapSeconds` 计入
- *   —— 与实时累加的间隔封顶同一口径，避免把 13 小时的断点当成一帧的高流量。
- *
- * 注：封顶是**绝对秒数**，桶宽本身大于 `maxGapSeconds` 时（范围很大 ⇒ 桶很粗）也会被压到封顶值，
- * 上报间隔本身就超过 `maxGapSeconds` 的设备应把该值调大。
- * 桶内该列全缺测（`v === null`）的段整段跳过。
+ * 累计列（流量总计 `liu_liang1`、运行时长 `pump_run_time` / `heat_run_time`）逐帧落库，
+ * 故区间内的增量就是「区间内最后一帧的值 − 第一帧的值」。任一点缺测（区间内无带该列值的帧）
+ * 返回 0；差值为负（区间内累计值被清零改写过）也按 0 计。
  */
-export function integrateBuckets(
-  points: Array<{ t: number; v: number | null }>,
-  options: { stepSeconds: number; maxGapSeconds: number },
-): number {
-  const { stepSeconds, maxGapSeconds } = options
-  let total = 0
-  for (let i = 1; i < points.length; i++) {
-    const previous = points[i - 1]
-    const current = points[i]
-    if (!previous || !current || current.v === null) continue
-    const dtSeconds = (current.t - previous.t) / 1000
-    if (dtSeconds <= 0) continue
-    // 标签差明显超过桶宽 ⇒ 中间缺桶（断点）：封顶后再计入
-    const span = dtSeconds <= stepSeconds * 1.5 ? dtSeconds : Math.min(dtSeconds, maxGapSeconds)
-    total += (current.v * span) / 60
-  }
-  return total
+export function counterRange(head: number | null, tail: number | null): number {
+  if (head === null || tail === null) return 0
+  const diff = tail - head
+  return diff > 0 ? diff : 0
 }
 
 /**

@@ -422,6 +422,7 @@ UPDATE sensor_data SET field7 = NULL WHERE field7 IN (65535, 6553.5);  -- pressu
   —— 与实时累加的间隔封顶同一口径（缺 13 小时的断点不会被当成一帧的高流量积分进去）；
   桶内该列全缺测的那一段整段跳过。封顶是绝对秒数，**上报间隔本身就超过该值的设备要把
   `max_gap_seconds` 调大**，否则该段会被少算。
+- 2026-09-17 更新：上述积分口径已废弃，改为**头尾两点相减**（见文末最新一条）。
 
 #### 时间文本口径修正：`GET /api/{source}/time-range`
 
@@ -553,4 +554,23 @@ UPDATE sensor_data_mapper SET mapping = '{"0":"关","1":"开"}'
 - 与 `direct_config` 的 `关:0|开:1`（控制面板）口径一致
 - 自检：`pnpm exec tsx tests/e2e/verify_seeds.ts`（本机 2026-09-17 已回填，`sensor_data_mapper`
   无差异）
+
+### 2026-09-17：累计类查询改为「头尾两点相减」；新增 `GET /api/sensor/runtime`
+
+累计列（流量总计 `liu_liang1`、运行时长 `pump_run_time` / `heat_run_time`）逐帧落库，
+区间内的增量就是**区间内末帧累计值 − 首帧累计值**，不再按时间桶积分重算（原积分口径废弃）。
+
+- `GET /api/sensor/flow/total?d_no&start&end`：流量总计（L），改取头尾两点相减；`start`/`end`
+  仍可选（缺省 = 该设备最早 / 最新的落库帧，与原先同义），返回 `{ d_no, start, end, total }`，
+  其中 `start`/`end` 改为**实际参与相减的那两帧的时刻**
+- `GET /api/sensor/runtime?d_no&start&end`（新）：水泵 / 加热累计运行时长（s），同一口径
+  （头尾两点相减，累计列取 `sensor_data_mapper` 的 `pump_run_time` / `heat_run_time`），
+  返回 `{ d_no, start, end, pump, heat }`；契约 `api.ts::getRuntimeTotal(d_no, start?, end?)`
+- 两点缺一（区间内没有带该列值的帧）或区间内被清零改写过（尾 < 头）都按 `"0"` 计
+- ⚠️ 清零（`POST /api/sensor/flow/reset`）把最新落库帧的累计值改写为 0，跨该时刻的区间查询
+  会少算（负值已按 0 兜底）——按「清零之后的区间」查即可
+- 用例：`tests/sensorModule/derive.test.ts`（`counterRange`）、`tests/e2e/flow_db.mjs`
+  （换头帧 / 清零后区间）、`tests/e2e/runtime.mjs`（换头尾帧、无数据与参数校验）
+- E2E 连接时区：脚本需按服务口径建连接（`timezone: cfg.timezone === 'Z' ? '+00:00' : ...`），
+  否则库中时间串读回差 8 小时、回传 `start`/`end` 对不上落库帧
 

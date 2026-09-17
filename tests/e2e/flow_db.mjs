@@ -7,7 +7,8 @@ import WebSocket from 'ws'
  * 派生指标「库口径」（`config.json` 的 `sensor.derive.source=database`，默认即此）验证：
  *  1) 上报若干帧 → `liu_liang1` = 最新落库帧累计值 + 本帧流量 × 间隔；`heat_rate`/`avg_flow`
  *     由窗口内的落库帧算出（本帧也计入样本）
- *  2) `GET /api/sensor/flow/total`（不传时间 / 传时间）→ 按落库帧积分得到的流量总计
+ *  2) `GET /api/sensor/flow/total`（不传时间 / 传时间）→ 头尾两点相减得到的流量总计
+ *     （区间内末帧累计值 − 首帧累计值；传 `start` 即换头帧）
  *  3) `POST /api/sensor/flow/reset` → 最新落库帧的累计值被改写为 0，随后从 0 重新累加
  * 用法：起服务（默认配置）→ `node tests/e2e/flow_db.mjs`
  */
@@ -29,12 +30,16 @@ const check = (name, cond, extra = '') => {
 }
 
 const cfg = JSON.parse(fs.readFileSync('config.json', 'utf8')).database
+// 连接时区与服务一致（服务把 `database.timezone` 缺省值 `'Z'` 映射为 `'+00:00'`）：
+// 否则库中时间串读回会差 8 小时，回传 `start`/`end` 就对不上落库帧
+const dbTimezone = cfg.timezone === 'Z' ? '+00:00' : (cfg.timezone ?? '+00:00')
 const db = await mysql.createConnection({
   host: cfg.host,
   port: cfg.port,
   user: cfg.username,
   password: cfg.password,
   database: cfg.database_name,
+  timezone: dbTimezone,
 })
 const q = async (sql, params = []) => (await db.query(sql, params))[0]
 /** 累计流量列（mapper: api_name=liu_liang1 → db_name） */
@@ -131,50 +136,68 @@ const frames = await q(
 console.log('每帧累计流量:', JSON.stringify(totals))
 console.log('落库累计流量:', JSON.stringify(frames.map((row) => Number(row.total))))
 check('4 帧全部落库', frames.length === 4, `实际 ${frames.length}`)
-check('第 1 帧从 0 起算', totals[0] === 0, `实际 ${totals[0]}`)
-// c_time 为秒级：帧间隔算出来是 1~2s ⇒ 每帧累计 1~2L
+// 累计值是「上帧落库值 + 流量 × 间隔」的绝对值 ⇒ 服务进程内/库中若有该设备的历史，
+// 首帧就不是 0；故下面的断言只看**增量**（与历史无关）
+const gained = totals[3] - totals[0]
 check(
-  '逐帧按「上帧落库值 + 流量 × 间隔」累加（1~2L/帧）',
+  '逐帧按「上帧落库值 + 流量 × 间隔」累加（1~3L/帧）',
   totals
     .slice(1)
-    .every((value, index) => value - totals[index] > 0.9 && value - totals[index] < 2.1),
+    .every((value, index) => value - totals[index] > 0.9 && value - totals[index] < 3.1),
   JSON.stringify(totals),
 )
 check(
-  '4 帧累计 ≈ 3 个间隔 × 1L/s（2.9~6.1L）',
-  totals[3] > 2.9 && totals[3] < 6.1,
-  `实际 ${totals[3]}`,
+  '4 帧累计增量 ≈ 3 个间隔 × 1L/s（2.9~6.1L）',
+  gained > 2.9 && gained < 6.1,
+  `实际 ${gained.toFixed(2)}`,
 )
 check('WS 值 = 最新落库值', await lastRow().then((row) => Number(row.total) === totals[3]))
 
 const heatRate = Number(latest?.heat_rate)
 const avgFlow = Number(latest?.avg_flow)
-check('加热速度由落库帧算出（≈50°C/min）', heatRate > 30 && heatRate < 70, `实际 ${heatRate}`)
+// 4 帧共 3~9s（秒级时间戳 + 发布抖动）⇒ 3°C 的变化率落在 20~60°C/min
+check(
+  '加热速度由落库帧算出（3°C / 3~9s ⇒ 20~60°C/min）',
+  heatRate > 18 && heatRate < 70,
+  `实际 ${heatRate}`,
+)
 check('平均水流由落库帧算出（≈60L/min）', avgFlow > 55 && avgFlow < 65, `实际 ${avgFlow}`)
 
-// ---------- 2) 流量总计查询：不传时间 = 全段积分 ----------
+// ---------- 2) 流量总计查询：不传时间 = 全段（头尾两点相减） ----------
 const all = await getTotal({ d_no: D_NO })
 console.log('flow/total（全段）:', JSON.stringify(all.body?.data))
 check('查询返回 200', all.status === 200)
+const headRow = (
+  await q(`SELECT ${totalCol} AS total FROM sensor_data WHERE d_no = ? ORDER BY id ASC LIMIT 1`, [
+    D_NO,
+  ])
+)[0]
 check(
-  '全段积分 = 实时累计值（同一口径：间隔取帧时间差）',
-  Math.abs(Number(all.body?.data?.total) - totals[3]) < 0.05,
-  `积分 ${all.body?.data?.total} / 实时 ${totals[3]}`,
+  '全段 = 末帧累计值 − 首帧累计值（与库中头尾两点一致）',
+  Math.abs(Number(all.body?.data?.total) - (totals[3] - Number(headRow.total))) < 0.05,
+  `查询 ${all.body?.data?.total} / 库中 ${(totals[3] - Number(headRow.total)).toFixed(2)}`,
 )
 check(
   'start/end 缺省取落库首末时刻',
   Boolean(all.body?.data?.start) && Boolean(all.body?.data?.end),
 )
 
-const firstAt = (
-  await q(`SELECT c_time FROM sensor_data WHERE d_no = ? ORDER BY id ASC LIMIT 1`, [D_NO])
-)[0].c_time
-const fromFirst = await getTotal({ d_no: D_NO, start: nowStrOf(firstAt) })
+const firstFrames = await q(
+  `SELECT c_time FROM sensor_data WHERE d_no = ? ORDER BY id ASC LIMIT 2`,
+  [D_NO],
+)
+const fromFirst = await getTotal({ d_no: D_NO, start: nowStrOf(firstFrames[0].c_time) })
 check(
-  '传 start（首帧时刻）时不早于全段积分',
-  Number(fromFirst.body?.data?.total) > 0 &&
-    Number(fromFirst.body?.data?.total) <= Number(all.body?.data?.total) + 0.01,
+  '传 start = 首帧时刻 ⇒ 头帧不变，结果与全段一致',
+  Math.abs(Number(fromFirst.body?.data?.total) - Number(all.body?.data?.total)) < 0.01,
   `实际 ${fromFirst.body?.data?.total}`,
+)
+
+const fromSecond = await getTotal({ d_no: D_NO, start: nowStrOf(firstFrames[1].c_time) })
+check(
+  '传 start = 第 2 帧时刻 ⇒ 结果 = 末帧 − 第 2 帧（换头帧后相减）',
+  Math.abs(Number(fromSecond.body?.data?.total) - (totals[3] - totals[1])) < 0.05,
+  `实际 ${fromSecond.body?.data?.total} / 期望 ${(totals[3] - totals[1]).toFixed(2)}`,
 )
 
 const badTime = await getTotal({ d_no: D_NO, start: 'oops' })
@@ -197,11 +220,20 @@ await sleep(FRAME_MS)
 const restarted = Number(latest?.liu_liang1)
 check('清零后从 0 重新累加（首帧 1~2L）', restarted > 0 && restarted < 2.2, `实际 ${restarted}`)
 
+// 再发一帧：区间「清零之后」的头尾两点就是这两帧
+await publish()
+await sleep(FRAME_MS)
+const afterSecond = Number(latest?.liu_liang1)
 const sinceReset = await getTotal({ d_no: D_NO, start: resetAt })
 check(
-  '清零后按时间段查询只算清零之后的部分',
+  '清零后按时间段查询 = 该段头尾相减（第 2 帧 − 第 1 帧）',
+  Math.abs(Number(sinceReset.body?.data?.total) - (afterSecond - restarted)) < 0.05,
+  `实际 ${sinceReset.body?.data?.total} / 期望 ${(afterSecond - restarted).toFixed(2)}`,
+)
+check(
+  '清零后的区间结果 < 全段（不含清零前的累计）',
   Number(sinceReset.body?.data?.total) < Number(all.body?.data?.total),
-  `清零后 ${sinceReset.body?.data?.total} < 清零前 ${all.body?.data?.total}`,
+  `清零后 ${sinceReset.body?.data?.total} < 全段 ${all.body?.data?.total}`,
 )
 
 const missingDevice = await postReset('E2E_FLOW_DB_NONE')
@@ -209,20 +241,6 @@ check(
   '无数据的设备：清零不报错但不出现在结果里',
   missingDevice.status === 200 && missingDevice.body?.data?.devices?.length === 0,
   JSON.stringify(missingDevice.body?.data),
-)
-
-// ---------- 4) 断点间隔封顶：一对相隔 10 分钟的合成帧，最多按 max_gap_seconds(60s) 计入 ----------
-const gapStart = new Date(Date.now() - 20 * 60_000)
-const gapEnd = new Date(gapStart.getTime() + 10 * 60_000)
-await q(
-  `INSERT INTO sensor_data (d_no, c_time, field1, field6, ${totalCol}) VALUES (?,?,?,?,?),(?,?,?,?,?)`,
-  [D_NO, nowStrOf(gapStart), 25, 600, 0, D_NO, nowStrOf(gapEnd), 25, 600, 0],
-)
-const gapped = await getTotal({ d_no: D_NO, start: nowStrOf(gapStart), end: nowStrOf(gapEnd) })
-check(
-  '断点间隔按 max_gap_seconds 封顶（10 分钟只算 1 分钟 ⇒ ≈600L；不封顶会是 6000L）',
-  Number(gapped.body?.data?.total) > 500 && Number(gapped.body?.data?.total) < 700,
-  `实际 ${gapped.body?.data?.total}`,
 )
 
 // ---------- 收尾 ----------

@@ -22,6 +22,7 @@ import {
   handleDirectUpdate,
   handleFlowReset,
   handleFlowTotal,
+  handleRuntime,
   handleTable,
   handleTimeRange,
 } from './utils'
@@ -177,7 +178,7 @@ export class HttpServer implements Closable {
       wrap((req, res) => handleDataDevices(this.db(), req, res)),
     )
 
-    // 流量总计：库口径积分查询 + 清零（走 SensorModule：累计流量由该模块持有）
+    // 流量总计：库口径头尾两点相减 + 清零（走 SensorModule：累计流量由该模块持有）
     this.app.get(
       `${API_BASE}/sensor/flow/total`,
       wrap((req, res) => handleFlowTotal(this.sensor(), req, res)),
@@ -185,6 +186,12 @@ export class HttpServer implements Closable {
     this.app.post(
       `${API_BASE}/sensor/flow/reset`,
       wrap((req, res) => handleFlowReset(this.sensor(), req, res)),
+    )
+
+    // 累计运行时长：水泵 / 加热（同样取区间头尾两点相减）
+    this.app.get(
+      `${API_BASE}/sensor/runtime`,
+      wrap((req, res) => handleRuntime(this.sensor(), req, res)),
     )
 
     // 指令(direct)接口：由 DirectModule 处理（暂只接 HTTP，真实控制下发待接入）

@@ -118,17 +118,18 @@ export interface DataCount {
 }
 
 /**
- * 流量总计（库口径）：按落库帧的时间桶均值积分得到，单位 L。
+ * 流量总计（库口径）：区间**头尾两点相减**（区间内末帧累计值 − 首帧累计值），单位 L。
+ * 累计流量逐帧落库（`sensor_data_mapper` 里 `api_name='liu_liang1'` 对应的列）。
  * 对应接口：`GET /api/sensor/flow/total?d_no&start&end`。
  */
 export interface FlowTotal {
   /** 设备编号 */
   d_no: string
-  /** 实际起算时刻（缺省时为该设备最早落库时刻；无数据为 null） */
+  /** 实际起算时刻 = 区间内首个带累计值的落库帧时刻（无数据为 null） */
   start: Date | null
-  /** 实际截止时刻（缺省时为该设备最新落库时刻；无数据为 null） */
+  /** 实际截止时刻 = 区间内最后一个带累计值的落库帧时刻（无数据为 null） */
   end: Date | null
-  /** 积分得到的流量总计（L，字符串保留 2 位小数） */
+  /** 头尾两点相减得到的流量总计（L，字符串保留 2 位小数） */
   total: string
 }
 
@@ -138,6 +139,27 @@ export interface FlowTotal {
  */
 export interface FlowResetResult {
   devices: string[]
+}
+
+/**
+ * 运行时长汇总：区间**头尾两点相减**（区间内末帧累计值 − 首帧累计值），单位秒。
+ *
+ * 累计运行时长逐帧落库（`sensor_data` 里 `pump_run_time` / `heat_run_time` 对应列）：
+ * 上报帧里对应开关导通才把「与上一帧的间隔」累加进去（间隔超过
+ * `sensor.derive.max_gap_seconds` 的段按封顶计入，重启从最后落库帧续算）。
+ * 对应接口：`GET /api/sensor/runtime?d_no&start&end`。
+ */
+export interface RuntimeSummary {
+  /** 设备编号 */
+  d_no: string
+  /** 实际起算时刻 = 区间内首个带累计值的落库帧时刻（无数据为 null） */
+  start: Date | null
+  /** 实际截止时刻 = 区间内最后一个带累计值的落库帧时刻（无数据为 null） */
+  end: Date | null
+  /** 水泵累计运行时长（s，字符串保留 2 位小数） */
+  pump: string
+  /** 加热累计运行时长（s，字符串保留 2 位小数） */
+  heat: string
 }
 
 /** WHERE 操作符：按 SQL 占位符形态分四组，类型与运行时校验均由这些常量派生 */

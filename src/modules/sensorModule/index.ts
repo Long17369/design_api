@@ -4,15 +4,23 @@ import { log } from '@core/logger'
 import { Closable } from '@core/lifecycle'
 import { registerConfigSection } from '@core/config'
 import { Database } from '@core/database'
-import { resolveChartStep } from '@core/database/utils'
 import { sendAlarm } from '@modules/alarmModule/utils'
-import { DataPayload, FieldMapper, FlowResetResult, FlowTotal, WsData } from '@/types/types'
+import {
+  DataPayload,
+  FieldMapper,
+  FlowResetResult,
+  FlowTotal,
+  RuntimeSummary,
+  Where,
+  WsData,
+} from '@/types/types'
 import {
   DeviceSeen,
   DeviceState,
-  FlowTotalQuery,
   SensorConfig,
   SensorModuleConfig,
+  SensorRangePoint,
+  SensorRangeQuery,
 } from '@modules/sensorModule'
 import {
   accumulateFlow,
@@ -22,10 +30,11 @@ import {
   buildSensorRow,
   calcAvgFlow,
   calcHeatRate,
+  counterRange,
   dbColumn,
   fmt,
+  frameTime,
   hasSpike,
-  integrateBuckets,
   intOr,
   isOfflineDue,
   isOn,
@@ -61,9 +70,6 @@ const DEFAULT_DERIVE: SensorModuleConfig['derive'] = { source: 'database', max_g
 
 /** 库口径每帧读取的落库帧数上限：按主键倒序取最近 N 帧（主键倒序扫描，不做全表排序） */
 const FRAME_LIMIT = 100
-
-/** 流量总计查询的桶数上限（与图表接口一致）：范围内秒数超过它时改用更粗的桶做积分 */
-const BUCKET_LIMIT = 10_000
 
 /**
  * 传感器数据模块：
@@ -347,45 +353,103 @@ export class SensorModule implements Closable {
   }
 
   /**
-   * 流量总计查询（库口径）：对该设备在 `[start, end]` 内的落库帧做时间桶积分。
+   * 流量总计查询（库口径）：取区间**头尾两点相减**（区间内首帧与末帧的累计值之差）。
    * 不传 `start`/`end` 时分别取该设备最早 / 最新的落库时刻（`end` 不传即「到末尾」）。
    */
-  public async queryTotalFlow(query: FlowTotalQuery): Promise<FlowTotal> {
+  public async queryTotalFlow(query: SensorRangeQuery): Promise<FlowTotal> {
     const db = this.requireDatabase()
     const mapper = await this.loadMapper(db)
-    const flowColumn = dbColumn(mapper, 'flow_rate')
-    if (!flowColumn) {
-      throw new Error('缺少瞬时流量字段映射（sensor_data_mapper.api_name=flow_rate）')
+    const totalColumn = dbColumn(mapper, 'liu_liang1')
+    if (!totalColumn) {
+      throw new Error('缺少累计流量字段映射（sensor_data_mapper.api_name=liu_liang1）')
+    }
+    const { head, tail } = await this.rangeEndpoints(db, query, totalColumn)
+    return {
+      d_no: query.d_no,
+      start: head?.t ?? null,
+      end: tail?.t ?? null,
+      total: fmt(counterRange(head?.v ?? null, tail?.v ?? null)),
+    }
+  }
+
+  /**
+   * 运行时长查询（库口径）：水泵 / 加热累计运行时长同样取区间**头尾两点相减**
+   * （累计列 `api_name=pump_run_time` / `heat_run_time`，导通帧才累加，见 `accumulateRunTimeFromBaseline`）。
+   */
+  public async queryRuntime(query: SensorRangeQuery): Promise<RuntimeSummary> {
+    const db = this.requireDatabase()
+    const mapper = await this.loadMapper(db)
+    const pumpColumn = dbColumn(mapper, 'pump_run_time')
+    const heatColumn = dbColumn(mapper, 'heat_run_time')
+    if (!pumpColumn || !heatColumn) {
+      throw new Error(
+        '缺少运行时长字段映射（sensor_data_mapper.api_name=pump_run_time / heat_run_time）',
+      )
+    }
+    const [pump, heat] = await Promise.all([
+      this.rangeEndpoints(db, query, pumpColumn),
+      this.rangeEndpoints(db, query, heatColumn),
+    ])
+    return {
+      d_no: query.d_no,
+      start: pump.head?.t ?? heat.head?.t ?? null,
+      end: pump.tail?.t ?? heat.tail?.t ?? null,
+      pump: fmt(counterRange(pump.head?.v ?? null, pump.tail?.v ?? null)),
+      heat: fmt(counterRange(heat.head?.v ?? null, heat.tail?.v ?? null)),
+    }
+  }
+
+  /**
+   * 区间头尾两点：某累计列在 `[start, end]` 内**最早 / 最新有值**的落库帧（两次单行查询）。
+   *
+   * where 每列只能带一个条件，故时间只作单边过滤（头查 `>= start`、尾查 `<= end`），
+   * 取回后再按另一边校验 —— 越界即说明区间内没有带该列值的帧。
+   */
+  private async rangeEndpoints(
+    db: Database,
+    query: SensorRangeQuery,
+    column: string,
+  ): Promise<{ head: SensorRangePoint | null; tail: SensorRangePoint | null }> {
+    const fetchOne = async (
+      order: 'ASC' | 'DESC',
+      bound?: { operator: '>=' | '<='; value: Date },
+    ): Promise<SensorRangePoint | null> => {
+      const where: Where = {
+        d_no: { operator: '=', value: query.d_no },
+        [column]: { operator: 'is not null' },
+        ...(bound ? { c_time: bound } : {}),
+      }
+      const rows = await db.executeQuery<Record<string, unknown>>({
+        table: 'sensor_data',
+        columns: ['c_time', column],
+        where,
+        orderBy: 'id',
+        order,
+        limit: '1',
+        offset: '0',
+      })
+      const row = rows[0]
+      if (!row) return null
+      const at = frameTime(row['c_time'])
+      if (at === null) return null
+      return { t: new Date(at), v: toNum(row[column] as string | number | null) }
     }
 
-    const range = await db.timeRange('sensor_data', {
-      d_no: { operator: '=', value: query.d_no },
-    })
-    // `timeRange` 返回 `Date`，可直接作为积分区间
-    const start = query.start ?? range.minTime
-    const end = query.end ?? range.maxTime
-    if (start === null || end === null || end.getTime() < start.getTime()) {
-      return { d_no: query.d_no, start, end, total: fmt(0) }
+    const head = await fetchOne(
+      'ASC',
+      query.start ? { operator: '>=', value: query.start } : undefined,
+    )
+    const tail = await fetchOne(
+      'DESC',
+      query.end ? { operator: '<=', value: query.end } : undefined,
+    )
+    const within = (point: SensorRangePoint | null): SensorRangePoint | null => {
+      if (!point) return null
+      if (query.start && point.t.getTime() < query.start.getTime()) return null
+      if (query.end && point.t.getTime() > query.end.getTime()) return null
+      return point
     }
-
-    // 桶宽最细 1 秒（范围内秒数 > 桶数上限时自动放宽），桶内取瞬时流量均值做积分
-    const seconds = Math.max(1, Math.round((end.getTime() - start.getTime()) / 1000))
-    const buckets = Math.min(BUCKET_LIMIT, seconds)
-    const points = await db.chart('sensor_data', {
-      where: { d_no: { operator: '=', value: query.d_no } },
-      start,
-      end,
-      buckets,
-    })
-    const samples = points.map((point) => ({
-      t: point.c_time.getTime(),
-      v: toNum(point[flowColumn] as string | number | null | undefined),
-    }))
-    const total = integrateBuckets(samples, {
-      stepSeconds: resolveChartStep(start, end, buckets),
-      maxGapSeconds: this.config.derive.max_gap_seconds,
-    })
-    return { d_no: query.d_no, start, end, total: fmt(total) }
+    return { head: within(head), tail: within(tail) }
   }
 
   /**

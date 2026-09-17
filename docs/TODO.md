@@ -229,7 +229,7 @@
   - 配置：`config.json` 的 `sensor.derive{source: database(默认)|memory, max_gap_seconds: 60}`（schema 内联节 + 对象默认值，含热更新）
   - database 口径：加热速度/平均水流按窗口内落库帧算（约滞后一帧）；流量总计 = 最新落库帧累计值 + 本帧流量 × 间隔（封顶 `max_gap_seconds`，首帧不计 ⇒ 重启不凭空补流量）；每帧一次查询（主键倒序扫描）
   - memory 口径保留原行为（进程内滑窗 + 累加，启动时从最后落库帧续算）
-  - 新增接口：`GET /api/sensor/flow/total?d_no&start&end`（落库帧时间桶积分，缺桶断点按 `max_gap_seconds` 封顶）、`POST /api/sensor/flow/reset {d_no}`（内存累计态归零 + 改写最新落库帧累计值为 0）；契约 `api.ts::getFlowTotal/resetFlow`；CLI `flow <d_no>` / `flowall`
+  - 新增接口：`GET /api/sensor/flow/total?d_no&start&end`（**头尾两点相减**：区间内末帧累计值 − 首帧累计值，2026-09-17 改口径）、`POST /api/sensor/flow/reset {d_no}`（内存累计态归零 + 改写最新落库帧累计值为 0）、`GET /api/sensor/runtime?d_no&start&end`（水泵 / 加热累计运行时长，同一口径）；契约 `api.ts::getFlowTotal/resetFlow/getRuntimeTotal`；CLI `flow <d_no>` / `flowall`
   - 顺带修正：`Database.timeRange` 曾改为库侧 `DATE_FORMAT` 返回时间文本（规避当时的连接时区换算）；2026-09-17 起连接时区改走 mysql2 默认（本机），该处已改回 `MIN/MAX(c_time)` 直出 `Date`
   - 用例：`tests/sensorModule/derive.test.ts`、`tests/e2e/flow_db.mjs`（库/内存两种口径各跑一遍）
 

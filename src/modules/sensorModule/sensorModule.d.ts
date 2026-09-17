@@ -79,14 +79,25 @@ declare module '@modules/sensorModule' {
     derive: SensorDeriveConfig
   }
 
-  /** 流量总计查询参数（`start`/`end` 缺省时取该设备最早的落库时刻 / 最新的落库时刻） */
-  interface FlowTotalQuery {
+  /**
+   * 累计量区间查询参数（`start`/`end` 缺省时分别取该设备最早 / 最新的落库时刻）。
+   * 流量总计与运行时长查询共用。
+   */
+  interface SensorRangeQuery {
     /** 设备编号 */
     d_no: string
     /** 起算时刻 */
     start?: Date
     /** 截止时刻 */
     end?: Date
+  }
+
+  /** 区间端点：累计量查询取头尾两点相减，本类型 = 其中一点 */
+  interface SensorRangePoint {
+    /** 落库时刻 */
+    t: Date
+    /** 累计列的值（NULL 视为缺测） */
+    v: number | null
   }
 
   /** 设备上报轨迹（离线监控用） */

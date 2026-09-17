@@ -308,7 +308,7 @@ export async function handleDataDevices(db: Database, _req: Request, res: Respon
 }
 
 /**
- * 处理 GET /sensor/flow/total —— 按落库帧积分得到的流量总计（L）。
+ * 处理 GET /sensor/flow/total —— 流量总计（L）：区间**头尾两点相减**。
  *
  * Query：`d_no`（必填）、`start` / `end`（可选，JSON 形式时间）：
  * 不传 `start` 即从该设备最早的落库时刻起算，不传 `end` 即算到最新的落库时刻。
@@ -326,6 +326,28 @@ export async function handleFlowTotal(
   const start = parseOptionalTime(query['start'], 'start')
   const end = parseOptionalTime(query['end'], 'end')
   const data = await sm.queryTotalFlow({
+    d_no: dNo,
+    ...(start !== undefined ? { start } : {}),
+    ...(end !== undefined ? { end } : {}),
+  })
+  res.status(200).json(successResponse(data))
+}
+
+/**
+ * 处理 GET /sensor/runtime —— 水泵 / 加热累计运行时长（s）：同样取区间**头尾两点相减**。
+ *
+ * Query：`d_no`（必填）、`start` / `end`（可选，JSON 形式时间）：
+ * 不传 `start` 即从该设备最早的落库时刻起算，不传 `end` 即算到最新的落库时刻。
+ */
+export async function handleRuntime(sm: SensorModule, req: Request, res: Response): Promise<void> {
+  const query = (req.query ?? {}) as Record<string, unknown>
+  const dNo = firstQuery(query['d_no'])
+  if (!dNo) {
+    throw new HttpError(400, 'INVALID_PARAMS', '缺少 d_no 参数')
+  }
+  const start = parseOptionalTime(query['start'], 'start')
+  const end = parseOptionalTime(query['end'], 'end')
+  const data = await sm.queryRuntime({
     d_no: dNo,
     ...(start !== undefined ? { start } : {}),
     ...(end !== undefined ? { end } : {}),
