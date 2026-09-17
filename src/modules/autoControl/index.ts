@@ -162,7 +162,7 @@ export class AutoControlModule implements Closable {
           continue
         }
         const controlReason = c.relay ? `${reason}（关泵联动关加热）` : reason
-        await setControl(dm, db, ctx.d_no, c.target, c.value, controlReason)
+        await setControl(dm, ctx.d_no, c.target, c.value, controlReason)
         ctx.values.set(c.target, c.value)
       }
     }

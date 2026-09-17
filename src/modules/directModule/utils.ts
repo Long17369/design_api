@@ -161,7 +161,7 @@ export function directValueQuery(config_id: string, d_no: string): DataQueryPara
  */
 export function controlLogRow(
   d_no: string,
-  target: 'heat' | 'water',
+  target: string,
   value: string,
   reason: string,
   source: NonNullable<SetValueParams['source']> = 'manual',

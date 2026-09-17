@@ -444,6 +444,12 @@ export async function handleDirectUpdate(
   ) {
     throw new HttpError(400, 'INVALID_PARAMS', '缺少 config_id / value / d_no')
   }
-  await dm.setValue({ config_id, value, d_no })
+  // 来源与旧实现一致：auto 开关算「参数配置」，其余算「手动控制」；控制记录由 setValue 统一落库
+  await dm.setValue({
+    config_id,
+    value,
+    d_no,
+    source: config_id === 'auto' ? 'config' : 'manual',
+  })
   res.status(200).json(successResponse({ config_id, value, d_no }))
 }

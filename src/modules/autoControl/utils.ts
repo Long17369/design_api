@@ -1,6 +1,5 @@
 import { log } from '@core/logger'
 import { Database } from '@core/database'
-import { nowSecond } from '@core/utils'
 import { DirectModule } from '@modules/directModule'
 import { WsData } from '@/types/types'
 import {
@@ -164,25 +163,15 @@ export function isTempAnomaly(state: DeviceState, cfg: AutoConfig): boolean {
   return Math.max(...outs) - Math.min(...outs) <= cfg.temp2StableDelta
 }
 
-/** 下发控制（经 DirectModule）并写控制记录 control_log */
+/** 下发控制（经 DirectModule；控制记录由 `setValue` 统一落库） */
 export async function setControl(
   dm: DirectModule,
-  db: Database,
   dNo: string,
   target: ControlTarget,
   value: '0' | '1',
   reason: string,
 ): Promise<void> {
-  await dm.setValue({ config_id: target, value, d_no: dNo, source: 'auto' })
-  await db.insert('control_log', {
-    d_no: dNo,
-    c_time: nowSecond(),
-    field1: 'auto',
-    field2: target,
-    field3: value === '1' ? 'on' : 'off',
-    field4: value,
-    field5: reason,
-  })
+  await dm.setValue({ config_id: target, value, d_no: dNo, source: 'auto', reason })
 }
 
 /**

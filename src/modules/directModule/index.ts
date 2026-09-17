@@ -183,6 +183,13 @@ export class DirectModule implements Closable {
       throw err
     }
 
+    // 控制记录（control_log）统一在此落库：各调用方（手动控制/自动控制/配置页/设备同步/复位）
+    // 不再各写各的，避免再漏（曾漏掉配置页 /api/direct/update 的手动操作）
+    await this.db().insert(
+      'control_log',
+      controlLogRow(d_no, config_id, storedValue, params.reason ?? '', source),
+    )
+
     // 写库成功后：先下发设备，再通知前端（前端刷新时指令已发出）
     this.dispatch(d_no, config_id, storedValue)
     if (notify) {
@@ -230,17 +237,13 @@ export class DirectModule implements Closable {
   /** 以设备实际状态为准回写单个目标（写库 + 下发 + 设备来源通知 + 控制记录 + 告警） */
   private async syncValue(dNo: string, { target, instructed, value }: DeviceSyncTrigger) {
     logger.info(`设备状态同步: [${dNo}] ${target} 指令 ${instructed} → 实际 ${value}`)
-    await this.setValue({ config_id: target, value, d_no: dNo, source: 'device' })
-    await this.db().insert(
-      'control_log',
-      controlLogRow(
-        dNo,
-        target,
-        value,
-        `设备状态同步（连续 ${this.config.device_sync.frames} 帧不一致）`,
-        'device',
-      ),
-    )
+    await this.setValue({
+      config_id: target,
+      value,
+      d_no: dNo,
+      source: 'device',
+      reason: `设备状态同步（连续 ${this.config.device_sync.frames} 帧不一致）`,
+    })
     await sendAlarm(this.db(), dNo, SYNC_ALARM, `${target}: 指令 ${instructed} → 实际 ${value}`)
   }
 
@@ -261,8 +264,7 @@ export class DirectModule implements Closable {
 
     const value = action === 'on' ? '1' : '0'
     // 写库 + 下发设备 + WS direct 通知（保护性锁定会在此拦截「开启水泵」）
-    await this.setValue({ config_id: target, value, d_no, source: 'manual' })
-    await this.db().insert('control_log', controlLogRow(d_no, target, value, '手动控制'))
+    await this.setValue({ config_id: target, value, d_no, source: 'manual', reason: '手动控制' })
     logger.info(`手动控制已执行: [${d_no}] ${target} = ${value} (${action})`)
   }
 
@@ -360,8 +362,7 @@ export class DirectModule implements Closable {
     const reason = '手动复位：恢复运行'
     for (const target of ['heat', 'water'] as const) {
       if (snapshot?.[target] !== '1') continue
-      await this.setValue({ config_id: target, value: '1', d_no, source: 'manual' })
-      await db.insert('control_log', controlLogRow(d_no, target, '1', reason))
+      await this.setValue({ config_id: target, value: '1', d_no, source: 'manual', reason })
     }
     lockManager.clearSnapshot(d_no)
 

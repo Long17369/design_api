@@ -57,10 +57,12 @@ declare module '@modules/directModule' {
     config_id: string
     value: string | number
     d_no: string
-    /** 变更来源：手动(HTTP/复位) / 自动控制 */
+    /** 变更来源：手动(HTTP/复位) / 自动控制 / 参数配置 / 设备 */
     source?: 'manual' | 'auto' | 'config' | 'device'
     /** 是否推送 direct 通知（默认 true；仅需落库/下发而不通知前端时传 false） */
     notify?: boolean
+    /** 控制理由（落库 control_log.field5；自动控制必填，手动/参数配置为空） */
+    reason?: string
   }
   /** direct_config 表行（含保留字 order 列，查询时需加反引号） */
   interface DirectConfigRow {

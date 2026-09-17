@@ -504,3 +504,24 @@ UPDATE sensor_data SET field7 = NULL WHERE field7 IN (65535, 6553.5);  -- pressu
 `2026-09-16` 曾把两者改成库侧 `DATE_FORMAT` 输出的 `'YYYY-MM-DD HH:mm:ss'` 文本（为规避
 当时连接时区 `'Z'` 下的驱动换算）。连接时区改走 mysql2 默认（本机）后，该规避不再需要：
 恢复为 `MIN/MAX(c_time)` 直出 `Date`，出网即 ISO 8601 UTC（见上一条）。取值语义不变。
+
+### 2026-09-17：控制记录（`control_log`）补上配置页的操作
+
+原先只有 `POST /api/control`（手动开/关）、自动控制、设备状态同步、手动复位会写 `control_log`，
+配置页的 `POST /api/direct/update` 不写 ⇒ **操作记录里看不到配置页的改动**。
+
+现在统一由 `DirectModule.setValue` 落库（各调用方只传 `source` / `reason`，不再各写各的）：
+
+| 入口                                   | `field1`(来源) | `field5`(理由)                    |
+| -------------------------------------- | -------------- | --------------------------------- |
+| 配置页（`auto` 开关）                  | `config`       | 空                                |
+| 配置页（其余配置项）                   | `manual`       | 空                                |
+| 手动控制 `POST /api/control`、手动复位 | `manual`       | `手动控制` / `手动复位：恢复运行` |
+| 自动控制                               | `auto`         | 决策理由（必填）                  |
+| 设备状态同步                           | `device`       | `设备状态同步（连续 N 帧不一致）` |
+
+- `field2`(控制对象) = `config_id`，不再只有 `heat`/`water` ⇒ 其余配置项显示**原始配置码**
+  （`control_log_mapper.mapping` 目前只映射 heat/water）。
+- `field3`(动作) 沿用旧实现 `value === '1' ? 'on' : 'off'` ⇒ 非 0/1 的取值（如 `pid_target=45`）记为 `off`。
+- 同一动作**只记一条**（记录点从 5 处收敛到 1 处）。
+
