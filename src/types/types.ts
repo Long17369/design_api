@@ -304,6 +304,10 @@ export interface WsData {
   heat_rate: string
   /** 实时平均水流(L/min)，基于配置窗口(avg_flow_window，默认60s)计算 */
   avg_flow: string
+  /** 水泵累计运行时长(s)：按上报帧间隔累加，仅开关导通时计入 */
+  pump_run_time?: string
+  /** 加热累计运行时长(s)：按上报帧间隔累加，仅开关导通时计入 */
+  heat_run_time?: string
   /** 数据质量标记：true=疑似跳变/无效数据（前端曲线标注，来自 sensor_spike mark 模式） */
   invalid?: boolean
 }

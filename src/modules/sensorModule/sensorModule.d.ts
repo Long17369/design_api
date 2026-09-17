@@ -18,6 +18,10 @@ declare module '@modules/sensorModule' {
     lastTime: number | null
     /** 本地累计流量(L) */
     totalFlow: number
+    /** 本地累计水泵运行时长(s) */
+    pumpRunTime: number
+    /** 本地累计加热运行时长(s) */
+    heatRunTime: number
     /** 出水温度采样（heat_rate 窗口） */
     tempSamples: SensorSample[]
     /** 瞬时流量采样（avg_flow 窗口） */
@@ -26,7 +30,7 @@ declare module '@modules/sensorModule' {
     lastRaw: DataPayload | null
     /** 连续跳变帧数（防抖：达到阈值帧数才标记无效） */
     spikeCount: number
-    /** 是否已尝试从数据库恢复累计流量（进程启动后首次上报） */
+    /** 是否已尝试从数据库恢复累计计数器（进程启动后首次上报） */
     restored: boolean
   }
 

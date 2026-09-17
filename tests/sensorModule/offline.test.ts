@@ -154,7 +154,7 @@ describe('缺测（空值）不污染派生值与落库', () => {
     const row = buildSensorRow(
       frame({ temp_in: '', temp_out: '40.0', pressure: undefined as never }),
       mapper,
-      '12.5',
+      { liu_liang1: '12.5' },
     )
     expect(row).toEqual({ field2: '40.0', field5: '12.5' })
   })

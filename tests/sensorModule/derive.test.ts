@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   accumulateFromBaseline,
+  accumulateRunTimeFromBaseline,
   dbColumn,
   frameTime,
   integrateBuckets,
@@ -92,6 +93,18 @@ describe('库口径流量总计（基准帧 + 本帧积分）', () => {
 
   it('时间倒挂（本帧时间早于基准帧）不减计数', () => {
     expect(accumulateFromBaseline(10, now + 30_000, 12, now, 60)).toBe(10)
+  })
+})
+
+describe('库口径累计运行时长（基准帧 + 导通间隔）', () => {
+  const now = parseTime('2026-09-15 10:01:00')
+
+  it('仅开关导通时计入；间隔封顶 max_gap_seconds；无基准帧不补计', () => {
+    expect(accumulateRunTimeFromBaseline(null, null, true, now, 60)).toBe(0)
+    expect(accumulateRunTimeFromBaseline(30, now - 30_000, true, now, 60)).toBe(60) // 30 + 30s
+    expect(accumulateRunTimeFromBaseline(30, now - 30_000, false, now, 60)).toBe(30) // 关着不计
+    expect(accumulateRunTimeFromBaseline(30, now - 600_000, true, now, 60)).toBe(90) // 10min 封顶成 60s
+    expect(accumulateRunTimeFromBaseline(30, null, true, now, 60)).toBe(30) // 重启首帧不补计
   })
 })
 

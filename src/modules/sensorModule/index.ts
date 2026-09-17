@@ -17,6 +17,8 @@ import {
 import {
   accumulateFlow,
   accumulateFromBaseline,
+  accumulateRunTime,
+  accumulateRunTimeFromBaseline,
   buildSensorRow,
   calcAvgFlow,
   calcHeatRate,
@@ -26,6 +28,7 @@ import {
   integrateBuckets,
   intOr,
   isOfflineDue,
+  isOn,
   offlineAlarm,
   offlineRecoveredAlarm,
   parseTime,
@@ -186,8 +189,12 @@ export class SensorModule implements Closable {
     }
     state.lastRaw = raw
 
-    // 3. 落库（按 mapper 的 api_name→db_name 映射组装行）
-    const row = buildSensorRow(raw, mapper, data.liu_liang1)
+    // 3. 落库（按 mapper 的 api_name→db_name 映射组装行；服务端算出的列覆盖同名上报字段）
+    const row = buildSensorRow(raw, mapper, {
+      liu_liang1: data.liu_liang1,
+      pump_run_time: data.pump_run_time,
+      heat_run_time: data.heat_run_time,
+    })
     if (Object.keys(row).length > 0) {
       await db.insert('sensor_data', row)
     }
@@ -200,7 +207,7 @@ export class SensorModule implements Closable {
     )
   }
 
-  /** 内存口径派生：进程内滑窗算加热速度/平均水流，进程内积分算流量总计（重启时从最后落库帧续算） */
+  /** 内存口径派生：进程内滑窗算加热速度/平均水流，进程内累加算流量总计与运行时长（重启时从最后落库帧续算） */
   private async deriveFromMemory(
     db: Database,
     raw: DataPayload,
@@ -209,18 +216,29 @@ export class SensorModule implements Closable {
     config: SensorConfig,
     now: number,
     flowRate: number | null,
-  ): Promise<Pick<WsData, 'liu_liang1' | 'heat_rate' | 'avg_flow'>> {
-    // 累计流量持久化：进程启动后首次上报时，从最后一条落库帧续算（重启不归零）
+  ): Promise<
+    Pick<WsData, 'liu_liang1' | 'heat_rate' | 'avg_flow' | 'pump_run_time' | 'heat_run_time'>
+  > {
+    // 累计值持久化：进程启动后首次上报时，从最后一条落库帧续算（重启不归零）
     if (!state.restored) {
       state.restored = true
-      await this.restoreTotalFlow(db, raw.id, mapper, state)
+      await this.restoreCounters(db, raw.id, mapper, state)
     }
     // 窗口取两者较大值，避免过早裁剪
     const windowSec = Math.max(config.heatRateWindow, config.avgFlowWindow)
     pushSample(state.tempSamples, now, toNum(raw.temp_out), windowSec)
     pushSample(state.flowSamples, now, flowRate, windowSec)
+    // `accumulateFlow` 会把 lastTime 推进到本帧，而运行时长要按「上一帧时刻」算 ⇒ 先取出来
+    const previousAt = state.lastTime
+    const totalFlow = accumulateFlow(state, flowRate, now)
     return {
-      liu_liang1: fmt(accumulateFlow(state, flowRate, now)),
+      liu_liang1: fmt(totalFlow),
+      pump_run_time: fmt(
+        accumulateRunTime(state, 'pumpRunTime', previousAt, isOn(raw.water_Y2), now),
+      ),
+      heat_run_time: fmt(
+        accumulateRunTime(state, 'heatRunTime', previousAt, isOn(raw.heat_Y1), now),
+      ),
       heat_rate: calcHeatRate(state.tempSamples, config.heatRateWindow, now),
       avg_flow: calcAvgFlow(state.flowSamples, config.avgFlowWindow, now),
     }
@@ -232,7 +250,8 @@ export class SensorModule implements Closable {
    * - 加热速度 / 平均水流：只用**落库帧**（不含本帧，故比内存口径滞后约一帧）；窗口筛选交给
    *   库侧、帧间差值只在库内时间之间计算 ⇒ 全程不受连接时区换算影响；
    * - 流量总计：最新落库帧的累计值 + 本帧流量 × 间隔（间隔 = 本帧 − **上一帧上报时间**，
-   *   同属上报时钟；首帧不计入 ⇒ 进程刚启动 / 刚重启不会凭空补流量）。
+   *   同属上报时钟；首帧不计入 ⇒ 进程刚启动 / 刚重启不会凭空补流量）；
+   * - 水泵 / 加热运行时长：最新落库帧的累计值 + 本帧间隔（**仅对应开关导通时**才计入，同样封顶）。
    *
    * 落库帧的写入列由 `sensor_data_mapper` 决定（`api_name` → `db_name`）：缺哪个映射就少算哪个指标。
    */
@@ -244,15 +263,24 @@ export class SensorModule implements Closable {
     state: DeviceState,
     now: number,
     flowRate: number | null,
-  ): Promise<Pick<WsData, 'liu_liang1' | 'heat_rate' | 'avg_flow'>> {
+  ): Promise<
+    Pick<WsData, 'liu_liang1' | 'heat_rate' | 'avg_flow' | 'pump_run_time' | 'heat_run_time'>
+  > {
     const totalColumn = dbColumn(mapper, 'liu_liang1')
     const flowColumn = dbColumn(mapper, 'flow_rate')
     const tempColumn = dbColumn(mapper, 'temp_out')
+    const pumpRunColumn = dbColumn(mapper, 'pump_run_time')
+    const heatRunColumn = dbColumn(mapper, 'heat_run_time')
     const windowSec = Math.max(config.heatRateWindow, config.avgFlowWindow)
     // 窗口起点直接用 `Date`：与 c_time 走同一套 mysql2 本机时区换算，库侧比较
-    const columns = ['c_time', totalColumn, flowColumn, tempColumn].filter(
-      (column): column is string => column !== null,
-    )
+    const columns = [
+      'c_time',
+      totalColumn,
+      flowColumn,
+      tempColumn,
+      pumpRunColumn,
+      heatRunColumn,
+    ].filter((column): column is string => column !== null)
     const rows = await db.executeQuery<Record<string, unknown>>({
       table: 'sensor_data',
       columns,
@@ -271,7 +299,9 @@ export class SensorModule implements Closable {
       (
         await db.executeQuery<Record<string, unknown>>({
           table: 'sensor_data',
-          columns: ['id', totalColumn].filter((column): column is string => column !== null),
+          columns: ['id', totalColumn, pumpRunColumn, heatRunColumn].filter(
+            (column): column is string => column !== null,
+          ),
           where: { d_no: { operator: '=', value: raw.id } },
           orderBy: 'id',
           order: 'DESC',
@@ -289,17 +319,28 @@ export class SensorModule implements Closable {
 
     const baseline =
       latest && totalColumn ? toNum(latest[totalColumn] as string | number | null) : null
-    const total = accumulateFromBaseline(
-      baseline,
+    const maxGapSeconds = this.config.derive.max_gap_seconds
+    const total = accumulateFromBaseline(baseline, state.lastTime, flowRate, now, maxGapSeconds)
+    const pumpRun = accumulateRunTimeFromBaseline(
+      latest && pumpRunColumn ? toNum(latest[pumpRunColumn] as string | number | null) : null,
       state.lastTime,
-      flowRate,
+      isOn(raw.water_Y2),
       now,
-      this.config.derive.max_gap_seconds,
+      maxGapSeconds,
+    )
+    const heatRun = accumulateRunTimeFromBaseline(
+      latest && heatRunColumn ? toNum(latest[heatRunColumn] as string | number | null) : null,
+      state.lastTime,
+      isOn(raw.heat_Y1),
+      now,
+      maxGapSeconds,
     )
     state.lastTime = now
 
     return {
       liu_liang1: fmt(total),
+      pump_run_time: fmt(pumpRun),
+      heat_run_time: fmt(heatRun),
       heat_rate: calcHeatRate(tempSamples, config.heatRateWindow, tempRef),
       avg_flow: calcAvgFlow(flowSamples, config.avgFlowWindow, tempRef),
     }
@@ -465,6 +506,8 @@ export class SensorModule implements Closable {
       state = {
         lastTime: null,
         totalFlow: 0,
+        pumpRunTime: 0,
+        heatRunTime: 0,
         tempSamples: [],
         flowSamples: [],
         lastRaw: null,
@@ -477,31 +520,43 @@ export class SensorModule implements Closable {
   }
 
   /**
-   * 从最后一条落库帧恢复累计流量（重启续算，不再归零）。
-   * 累计流量所在数据库列由 mapper 中 `api_name === 'liu_liang1'` 的 `db_name` 决定；
-   * 无映射或无历史数据时保持 0（首次运行）。
+   * 从最后一条落库帧恢复累计计数器（重启续算，不再归零）：累计流量 / 水泵运行时长 / 加热运行时长。
+   * 各值所在列由 mapper 的 `api_name` 决定；无映射或无历史数据时保持 0（首次运行）。
    */
-  private async restoreTotalFlow(
+  private async restoreCounters(
     db: Database,
     dNo: string,
     mapper: FieldMapper[],
     state: DeviceState,
   ): Promise<void> {
-    const column = mapper.find((m) => m.api_name === 'liu_liang1')?.db_name
-    if (!column) return
+    const columns = ['liu_liang1', 'pump_run_time', 'heat_run_time']
+      .map((apiName) => dbColumn(mapper, apiName))
+      .filter((column): column is string => column !== null)
+    if (columns.length === 0) return
     const rows = await db.executeQuery<Record<string, string | number | null>>({
       table: 'sensor_data',
-      columns: [column],
+      columns,
       where: { d_no: { operator: '=', value: dNo } },
       orderBy: 'id',
       order: 'DESC',
       limit: '1',
       offset: '0',
     })
-    const restored = toNum(rows[0]?.[column] ?? null)
-    if (restored === null || restored <= 0) return
-    state.totalFlow = restored
-    logger.info(`累计流量已恢复: ${dNo} = ${restored}L`)
+    const latest = rows[0]
+    if (!latest) return
+    const read = (apiName: string): number | null => {
+      const column = dbColumn(mapper, apiName)
+      return column ? toNum(latest[column] ?? null) : null
+    }
+    const flow = read('liu_liang1')
+    const pumpRun = read('pump_run_time')
+    const heatRun = read('heat_run_time')
+    if (flow !== null && flow > 0) state.totalFlow = flow
+    if (pumpRun !== null && pumpRun > 0) state.pumpRunTime = pumpRun
+    if (heatRun !== null && heatRun > 0) state.heatRunTime = heatRun
+    logger.info(
+      `累计值已恢复: ${dNo} 流量=${state.totalFlow}L 水泵=${state.pumpRunTime}s 加热=${state.heatRunTime}s`,
+    )
   }
 
   /** 读取派生计算配置（direct_config.default_value，缓存 tag=direct_config） */

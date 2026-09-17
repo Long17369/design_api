@@ -230,6 +230,46 @@ export function accumulateFlow(state: DeviceState, flowRate: number | null, now:
   return state.totalFlow
 }
 
+/** 开关上报值是否为「开」（`1`） */
+export function isOn(value: string | number | undefined | null): boolean {
+  return toNum(value) === 1
+}
+
+/**
+ * 库口径的累计运行时长(s)：上一帧落库值 + 本帧间隔（仅开关导通时计入，间隔封顶 `maxGapSeconds`）。
+ * 与 `accumulateFromBaseline` 同型：无基准帧（首次上报）时不补计，重启从落库值续算。
+ */
+export function accumulateRunTimeFromBaseline(
+  baseline: number | null,
+  baselineAt: number | null,
+  on: boolean,
+  now: number,
+  maxGapSeconds: number,
+): number {
+  const total = baseline !== null && baseline > 0 ? baseline : 0
+  if (!on || baselineAt === null) return total
+  const gapSeconds = Math.min((now - baselineAt) / 1000, maxGapSeconds)
+  return gapSeconds > 0 ? total + gapSeconds : total
+}
+
+/**
+ * 内存口径的累计运行时长(s)：把 Δt（`previousAt` → `now`）累加到 `state` 的对应计数器，
+ * 仅开关导通时计入。`previousAt` 需在 `accumulateFlow`（会推进 `state.lastTime`）之前取。
+ */
+export function accumulateRunTime(
+  state: DeviceState,
+  key: 'pumpRunTime' | 'heatRunTime',
+  previousAt: number | null,
+  on: boolean,
+  now: number,
+): number {
+  if (previousAt !== null && on) {
+    const dtSeconds = (now - previousAt) / 1000
+    if (dtSeconds > 0) state[key] += dtSeconds
+  }
+  return state[key]
+}
+
 /** 窗口内温度变化率(°C/min)：最新 − 最早 除以分钟差；样本不足返回 '' */
 export function calcHeatRate(samples: SensorSample[], windowSec: number, now: number): string {
   const win = samples.filter((s) => s.t >= now - windowSec * 1000)
@@ -251,19 +291,20 @@ export function calcAvgFlow(samples: SensorSample[], windowSec: number, now: num
 
 /**
  * 按 sensor_data_mapper 的 api_name→db_name 映射组装落库行。
- * liu_liang1 用计算后的累计流量；空值跳过（列留 NULL）；
- * 时间列（`c_time`）按本机时区解析成 `Date`，其余列按原样（数字保留数字）。
+ * `computed`（按 `api_name` 索引）是**服务端算出的列**（累计流量 / 水泵·加热运行时长），
+ * 优先于上报载荷；空值跳过（列留 NULL）；时间列（`c_time`）按本机时区解析成 `Date`，
+ * 其余列按原样（数字保留数字）。
  */
 export function buildSensorRow(
   raw: DataPayload,
   mapper: FieldMapper[],
-  totalFlow: string,
+  computed: Partial<Record<string, string>>,
 ): Record<string, SqlValue> {
   const row: Record<string, SqlValue> = {}
   const source = raw as unknown as Record<string, unknown>
   for (const m of mapper) {
     if (!m.api_name) continue
-    const value = m.api_name === 'liu_liang1' ? totalFlow : source[m.api_name]
+    const value = computed[m.api_name] ?? source[m.api_name]
     if (value === undefined || value === null || value === '') continue
     if (m.db_name === 'c_time') {
       row[m.db_name] = new Date(parseTime(String(value)))
