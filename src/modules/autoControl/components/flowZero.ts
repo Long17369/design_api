@@ -111,6 +111,7 @@ export const flowZeroComponent: AutoComponent = {
       reason: `水泵空转：流量 ${flow} 持续 ${cfg.pumpIdleSeconds}s 归零`,
       alarm: ALARM,
       controls,
+      block: true,
       stop: true,
     }
   },
